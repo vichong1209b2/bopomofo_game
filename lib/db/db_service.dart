@@ -133,15 +133,53 @@ class DbService {
     final ch = rows.first['ch'] as String;
     final answer = rows.first['bopo'] as String;
 
-    final other = await _db.rawQuery(r'''
+    final distractors = <String>[];
+    final base = _stripTone(answer);
+    final baseLen = _runeLen(base);
+
+    // 優先：同一個注音但不同聲調（增加混淆）
+    final toneLike = await _db.rawQuery(r'''
       SELECT DISTINCT bopomofo
       FROM character_pronunciation
-      WHERE bopomofo != ?
+      WHERE bopomofo != ''
+        AND bopomofo != ?
+        AND bopomofo LIKE ?
+        AND length(bopomofo) <= ?
       ORDER BY RANDOM()
-      LIMIT ?
-    ''', [answer, optionCount - 1]);
+      LIMIT 24
+    ''', [answer, '$base%', baseLen + 1]);
+    for (final r in toneLike) {
+      final b = (r['bopomofo'] as String?) ?? '';
+      if (b.isEmpty) continue;
+      if (_stripTone(b) != base) continue;
+      if (!distractors.contains(b)) distractors.add(b);
+      if (distractors.length >= optionCount - 1) break;
+    }
 
-    final options = <String>[answer, ...other.map((e) => e['bopomofo'] as String)]..shuffle(Random());
+    // 補齊：隨機其他注音（同題型不同難度可再調整）
+    if (distractors.length < optionCount - 1) {
+      final other = await _db.rawQuery(r'''
+        SELECT DISTINCT bopomofo
+        FROM character_pronunciation
+        WHERE bopomofo != ''
+          AND bopomofo != ?
+        ORDER BY RANDOM()
+        LIMIT ?
+      ''', [answer, 60]);
+      for (final r in other) {
+        final b = (r['bopomofo'] as String?) ?? '';
+        if (b.isEmpty) continue;
+        if (b == answer) continue;
+        if (!distractors.contains(b)) distractors.add(b);
+        if (distractors.length >= optionCount - 1) break;
+      }
+    }
+
+    while (distractors.length < optionCount - 1) {
+      distractors.add(_randomBopoFallback(exclude: {answer, ...distractors}));
+    }
+
+    final options = <String>[answer, ...distractors]..shuffle(Random());
     return CharToBopoQuestion(character: ch, answerBopomofo: answer, options: options);
   }
 
@@ -165,16 +203,53 @@ class DbService {
     final bopomofo = rows.first['bopo'] as String;
     final answerChar = rows.first['ch'] as String;
 
-    final other = await _db.rawQuery(r'''
-      SELECT c.char AS ch
-      FROM character c
-      WHERE c.game_priority != 'low'
-        AND c.char != ?
-      ORDER BY RANDOM()
-      LIMIT ?
-    ''', [answerChar, optionCount - 1]);
+    final distractors = <String>[];
+    final base = _stripTone(bopomofo);
+    final baseLen = _runeLen(base);
 
-    final options = <String>[answerChar, ...other.map((e) => e['ch'] as String)]..shuffle(Random());
+    // 優先：同注音不同聲調的字（更容易混淆）
+    final near = await _db.rawQuery(r'''
+      SELECT DISTINCT c.char AS ch, cp.bopomofo AS bopo
+      FROM character_pronunciation cp
+      JOIN character c ON c.char_id = cp.char_id
+      WHERE cp.game_priority != 'low'
+        AND c.game_priority != 'low'
+        AND cp.bopomofo != ''
+        AND cp.bopomofo != ?
+        AND cp.bopomofo LIKE ?
+        AND length(cp.bopomofo) <= ?
+      ORDER BY RANDOM()
+      LIMIT 36
+    ''', [bopomofo, '$base%', baseLen + 1]);
+    for (final r in near) {
+      final ch = (r['ch'] as String?) ?? '';
+      final b = (r['bopo'] as String?) ?? '';
+      if (ch.isEmpty) continue;
+      if (ch == answerChar) continue;
+      if (_stripTone(b) != base) continue;
+      if (!distractors.contains(ch)) distractors.add(ch);
+      if (distractors.length >= optionCount - 1) break;
+    }
+
+    // 補齊：隨機字
+    if (distractors.length < optionCount - 1) {
+      final other = await _db.rawQuery(r'''
+        SELECT c.char AS ch
+        FROM character c
+        WHERE c.game_priority != 'low'
+          AND c.char != ?
+        ORDER BY RANDOM()
+        LIMIT ?
+      ''', [answerChar, 80]);
+      for (final r in other) {
+        final ch = (r['ch'] as String?) ?? '';
+        if (ch.isEmpty) continue;
+        if (!distractors.contains(ch)) distractors.add(ch);
+        if (distractors.length >= optionCount - 1) break;
+      }
+    }
+
+    final options = <String>[answerChar, ...distractors.take(optionCount - 1)]..shuffle(Random());
     return BopoToCharQuestion(bopomofo: bopomofo, answerChar: answerChar, options: options);
   }
 
@@ -197,16 +272,68 @@ class DbService {
     final word = rows.first['word'] as String;
     final answer = (rows.first['bopomofo'] as String?) ?? '';
 
-    final other = await _db.rawQuery(r'''
+    final ansSyl = _syllables(answer);
+    final ansBase = ansSyl.map(_stripTone).toList(growable: false);
+    final ansBaseJoined = ansBase.join(' ');
+
+    // 抽一批候選，再用 Dart 做「同音/同長度/同聲調變化」篩選
+    final pool = await _db.rawQuery(r'''
       SELECT DISTINCT bopomofo
       FROM word
       WHERE bopomofo != ''
         AND bopomofo != ?
       ORDER BY RANDOM()
-      LIMIT ?
-    ''', [answer, optionCount - 1]);
+      LIMIT 320
+    ''', [answer]);
 
-    final options = <String>[answer, ...other.map((e) => e['bopomofo'] as String)]..shuffle(Random());
+    final sameLenToneVariant = <String>[];
+    final sameLenSimilar = <String>[];
+    final sameLenAny = <String>[];
+
+    for (final r in pool) {
+      final b = (r['bopomofo'] as String?) ?? '';
+      if (b.isEmpty) continue;
+      final syl = _syllables(b);
+      if (syl.length != ansSyl.length) continue;
+      sameLenAny.add(b);
+
+      final base = syl.map(_stripTone).toList(growable: false).join(' ');
+      if (base == ansBaseJoined && b != answer) {
+        sameLenToneVariant.add(b); // 同音不同調（或部分不同調）
+        continue;
+      }
+
+      // 至少有一個音節 base 相同
+      var shared = 0;
+      for (var i = 0; i < syl.length; i++) {
+        if (_stripTone(syl[i]) == ansBase[i]) shared++;
+      }
+      if (shared >= 1) sameLenSimilar.add(b);
+    }
+
+    final distractors = <String>[];
+    void pickFrom(List<String> src) {
+      src.shuffle(Random());
+      for (final b in src) {
+        if (b == answer) continue;
+        if (!distractors.contains(b)) distractors.add(b);
+        if (distractors.length >= optionCount - 1) break;
+      }
+    }
+
+    // 優先：同音不同調（最容易誤判）
+    pickFrom(sameLenToneVariant);
+    // 次要：同長度且部分音節相同
+    if (distractors.length < optionCount - 1) pickFrom(sameLenSimilar);
+    // 最後：同長度隨機
+    if (distractors.length < optionCount - 1) pickFrom(sameLenAny);
+
+    while (distractors.length < optionCount - 1) {
+      // fallback：若真的找不到同長度，至少給一般隨機（避免卡住）
+      distractors.add(_randomBopoFallback(exclude: {answer, ...distractors}));
+    }
+
+    final options = <String>[answer, ...distractors]..shuffle(Random());
     return WordToBopoQuestion(wordId: wordId, word: word, answerBopomofo: answer, options: options);
   }
 
@@ -235,6 +362,40 @@ class DbService {
   }
 
   // ====== helpers ======
+
+  static const _toneMarks = ['˙', 'ˊ', 'ˇ', 'ˋ'];
+
+  static String _stripTone(String s) {
+    var out = s;
+    for (final t in _toneMarks) {
+      out = out.replaceAll(t, '');
+    }
+    return out.trim();
+  }
+
+  static int _runeLen(String s) => s.runes.length;
+
+  static List<String> _syllables(String bopomofo) {
+    final s = bopomofo.trim();
+    if (s.isEmpty) return const [];
+    // 教育部資料通常用空白分隔音節
+    final parts = s.split(RegExp(r'\s+')).where((e) => e.trim().isNotEmpty).toList();
+    return parts.isEmpty ? [s] : parts;
+  }
+
+  static String _randomBopoFallback({required Set<String> exclude}) {
+    // 簡單 fallback：從常見注音符號中組合（避免完全空白）
+    const pool = ['ㄅ', 'ㄆ', 'ㄇ', 'ㄈ', 'ㄉ', 'ㄊ', 'ㄋ', 'ㄌ', 'ㄍ', 'ㄎ', 'ㄏ', 'ㄐ', 'ㄑ', 'ㄒ', 'ㄓ', 'ㄔ', 'ㄕ', 'ㄖ', 'ㄗ', 'ㄘ', 'ㄙ', 'ㄧ', 'ㄨ', 'ㄩ', 'ㄚ', 'ㄛ', 'ㄜ', 'ㄝ', 'ㄞ', 'ㄟ', 'ㄠ', 'ㄡ', 'ㄢ', 'ㄣ', 'ㄤ', 'ㄥ', 'ㄦ', '˙', 'ˊ', 'ˇ', 'ˋ'];
+    for (var i = 0; i < 60; i++) {
+      final len = 2 + _rng.nextInt(3);
+      var s = '';
+      for (var j = 0; j < len; j++) {
+        s += pool[_rng.nextInt(pool.length)];
+      }
+      if (!exclude.contains(s)) return s;
+    }
+    return 'ㄧ';
+  }
 
   static String _replaceAt(String s, int index, String replacement) {
     final chars = s.split("");

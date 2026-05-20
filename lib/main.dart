@@ -454,11 +454,11 @@ class _GamePageState extends State<GamePage> {
   final FlutterTts _tts = FlutterTts();
 
   int _score = 0;
-  int _attempts = 0;
-  int _correct = 0;
+  int _questions = 0; // 作答題數：每題/每輪只算 1 次（答錯重試不會一直 +1）
+  int _correct = 0; // 答對題數
   int _streak = 0;
   int _bestStreak = 0;
-  int _wrong = 0;
+  int _wrongTaps = 0; // 錯誤點擊次數（用於扣分/統計）
   int? _lives;
   int? _timeLeft;
   Timer? _timer;
@@ -481,6 +481,9 @@ class _GamePageState extends State<GamePage> {
   // 單題作答狀態（A/B/D/E）
   bool _locked = false; // 答對後鎖定（不能再答）
   final Set<String> _wrongOptions = {};
+  bool _currentCounted = false;
+  bool _currentTouched = false;
+  String? _selectedCorrectOption;
 
   @override
   void initState() {
@@ -536,6 +539,10 @@ class _GamePageState extends State<GamePage> {
   }
 
   Future<void> _next() async {
+    // 若使用者點「下一題」但本題已作答過（至少點過一次），算作完成一題（可能是跳過）
+    if (!_isFinished) {
+      _finalizeSkippedIfNeeded();
+    }
     setState(() {
       _feedback = null;
       _qA = null;
@@ -548,6 +555,9 @@ class _GamePageState extends State<GamePage> {
       _pairingMatchedBopos.clear();
       _locked = false;
       _wrongOptions.clear();
+      _currentCounted = false;
+      _currentTouched = false;
+      _selectedCorrectOption = null;
     });
 
     final db = _db;
@@ -578,22 +588,47 @@ class _GamePageState extends State<GamePage> {
     }
   }
 
-  void _mark(bool correct, {bool firstTry = true}) {
+  void _finalizeSkippedIfNeeded() {
+    if (_currentTouched && !_currentCounted) {
+      _questions += 1;
+      _currentCounted = true;
+      _streak = 0;
+    }
+  }
+
+  void _countSolvedIfNeeded({required bool solved, required bool firstTry}) {
+    if (_currentCounted) return;
+    _questions += 1;
+    _currentCounted = true;
+    if (solved) {
+      _correct += 1;
+      if (firstTry) {
+        _streak += 1;
+        if (_streak > _bestStreak) _bestStreak = _streak;
+      } else {
+        _streak = 0;
+      }
+    } else {
+      _streak = 0;
+    }
+  }
+
+  void _mark(bool correct, {bool firstTry = true, bool countAsQuestion = true}) {
     if (_isFinished) return;
+    _currentTouched = true;
     final rules = widget.playMode == PlayMode.practice
         ? const ScoringRules(correctFirstTry: 1, correctAfterWrong: 1, wrongPenalty: 0)
         : _defaultScoring;
 
     setState(() {
-      _attempts += 1;
       if (correct) {
-        _correct += 1;
-        _streak += 1;
-        if (_streak > _bestStreak) _bestStreak = _streak;
+        if (countAsQuestion) {
+          _countSolvedIfNeeded(solved: true, firstTry: firstTry);
+        }
         _score += firstTry ? rules.correctFirstTry : rules.correctAfterWrong;
         _feedback = '答對！ +${firstTry ? rules.correctFirstTry : rules.correctAfterWrong}';
       } else {
-        _wrong += 1;
+        _wrongTaps += 1;
         _streak = 0;
         _score += rules.wrongPenalty;
         _feedback = rules.wrongPenalty == 0 ? '答錯（練習模式不扣分）' : '答錯 ${rules.wrongPenalty}';
@@ -643,7 +678,8 @@ class _GamePageState extends State<GamePage> {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Text('分數：$_score'),
-              Text('答對：$_correct / $_attempts'),
+              Text('答對：$_correct / $_questions'),
+              Text('錯誤點擊：$_wrongTaps'),
               Text('最長連勝：$_bestStreak'),
               if (widget.playMode == PlayMode.survival) Text('剩餘生命：${_lives ?? 0}'),
             ],
@@ -681,7 +717,7 @@ class _GamePageState extends State<GamePage> {
   }
 
   ButtonStyle _styleForOption({required String opt, required String answer}) {
-    final correctColor = Colors.green;
+    final correctColor = Colors.blue;
     final wrongColor = Colors.red;
 
     if (_locked) {
@@ -708,6 +744,20 @@ class _GamePageState extends State<GamePage> {
     return FilledButton.styleFrom();
   }
 
+  Widget _optionChild({required String opt, required String answer, double fontSize = 20}) {
+    final isCorrect = _locked && opt == answer;
+    if (!isCorrect) return Text(opt, style: TextStyle(fontSize: fontSize));
+    return Row(
+      mainAxisAlignment: MainAxisAlignment.center,
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Flexible(child: Text(opt, style: TextStyle(fontSize: fontSize, fontWeight: FontWeight.w700))),
+        const SizedBox(width: 6),
+        Icon(Icons.sentiment_satisfied_alt, size: fontSize, color: Colors.blue.shade700),
+      ],
+    );
+  }
+
   void _tapOption({required String opt, required String answer}) {
     if (_isFinished) return;
     if (_locked) return;
@@ -717,10 +767,11 @@ class _GamePageState extends State<GamePage> {
     if (correct) {
       final firstTry = _wrongOptions.isEmpty;
       setState(() => _locked = true);
-      _mark(true, firstTry: firstTry);
+      _selectedCorrectOption = opt;
+      _mark(true, firstTry: firstTry, countAsQuestion: true);
     } else {
       setState(() => _wrongOptions.add(opt));
-      _mark(false);
+      _mark(false, countAsQuestion: false);
     }
   }
 
@@ -758,7 +809,7 @@ class _GamePageState extends State<GamePage> {
               ),
             Padding(
               padding: const EdgeInsets.only(right: 16),
-              child: Center(child: Text('$_score 分 / $_correct 題')),
+              child: Center(child: Text('$_score 分｜$_correct/$_questions 題')),
             )
           ],
         ),
@@ -823,7 +874,7 @@ class _GamePageState extends State<GamePage> {
                       onPressed: (_locked || _isFinished || _wrongOptions.contains(opt))
                           ? null
                           : () => _tapOption(opt: opt, answer: q.answerChar),
-                      child: Text(opt, style: const TextStyle(fontSize: 22)),
+                      child: _optionChild(opt: opt, answer: q.answerChar, fontSize: 22),
                     ),
                   );
                 }).toList(),
@@ -856,7 +907,7 @@ class _GamePageState extends State<GamePage> {
                     onPressed: (_locked || _isFinished || _wrongOptions.contains(opt))
                         ? null
                         : () => _tapOption(opt: opt, answer: q.answerBopomofo),
-                    child: Text(opt, style: const TextStyle(fontSize: 20)),
+                    child: _optionChild(opt: opt, answer: q.answerBopomofo, fontSize: 20),
                   ),
                 );
               }),
@@ -912,13 +963,16 @@ class _GamePageState extends State<GamePage> {
                               _pairingMatchedWords.add(w);
                               _pairingMatchedBopos.add(b);
                               setState(() => _pairingSelectedWord = null);
-                              _mark(true, firstTry: true);
+                              // 配對題：每個配對成功加分，但「題數」以整輪完成才算 1 題
+                              _mark(true, firstTry: true, countAsQuestion: false);
                               if (_pairingMatchedWords.length == totalPairs) {
-                                setState(() => _feedback = '本輪完成！可以按「下一輪 / 下一題」');
+                                setState(() => _feedback = '本輪完成！');
+                                _countSolvedIfNeeded(solved: true, firstTry: true);
+                                _checkEnd();
                               }
                             } else {
                               setState(() => _pairingSelectedWord = null);
-                              _mark(false);
+                              _mark(false, countAsQuestion: false);
                             }
                           },
                   );
@@ -950,7 +1004,7 @@ class _GamePageState extends State<GamePage> {
                       onPressed: (_locked || _isFinished || _wrongOptions.contains(opt))
                           ? null
                           : () => _tapOption(opt: opt, answer: q.answerChar),
-                      child: Text(opt, style: const TextStyle(fontSize: 22)),
+                      child: _optionChild(opt: opt, answer: q.answerChar, fontSize: 22),
                     ),
                   );
                 }).toList(),
@@ -977,7 +1031,7 @@ class _GamePageState extends State<GamePage> {
                     onPressed: (_locked || _isFinished || _wrongOptions.contains(opt))
                         ? null
                         : () => _tapOption(opt: opt, answer: q.answerBopomofo),
-                    child: Text(opt, style: const TextStyle(fontSize: 20)),
+                    child: _optionChild(opt: opt, answer: q.answerBopomofo, fontSize: 20),
                   ),
                 );
               }),
