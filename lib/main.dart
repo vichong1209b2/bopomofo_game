@@ -14,9 +14,33 @@ class BopoGameApp extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final scheme = ColorScheme.fromSeed(seedColor: Colors.pinkAccent, brightness: Brightness.light);
     return MaterialApp(
-      title: 'Bopomofo Game',
-      theme: ThemeData(colorSchemeSeed: Colors.indigo, useMaterial3: true),
+      title: '注音遊戲',
+      theme: ThemeData(
+        colorScheme: scheme,
+        useMaterial3: true,
+        scaffoldBackgroundColor: scheme.surface,
+        appBarTheme: AppBarTheme(
+          backgroundColor: scheme.primaryContainer,
+          foregroundColor: scheme.onPrimaryContainer,
+          centerTitle: true,
+        ),
+        cardTheme: CardTheme(
+          color: scheme.surfaceContainerHighest,
+          elevation: 0.5,
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        ),
+        filledButtonTheme: FilledButtonThemeData(
+          style: FilledButton.styleFrom(
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
+            padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 16),
+          ),
+        ),
+        outlinedButtonTheme: OutlinedButtonThemeData(
+          style: OutlinedButton.styleFrom(shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16))),
+        ),
+      ),
       home: const HomePage(),
     );
   }
@@ -28,6 +52,7 @@ enum GameMode {
   cPairing,
   dBopoToChar,
   eWordToBopo,
+  fWordChain,
   mix,
 }
 
@@ -118,6 +143,8 @@ String modeLabel(GameMode m) {
       return 'D 看注音選字';
     case GameMode.eWordToBopo:
       return 'E 看詞語選注音';
+    case GameMode.fWordChain:
+      return '接龍填空';
     case GameMode.mix:
       return '混合';
   }
@@ -132,7 +159,7 @@ String playModeLabel(PlayMode m) {
     case PlayMode.correctTarget:
       return '目標題數';
     case PlayMode.timeAttack:
-      return '限時';
+      return '限時挑戰';
     case PlayMode.survival:
       return '生存';
   }
@@ -162,10 +189,10 @@ class HomePage extends StatefulWidget {
 
 class _HomePageState extends State<HomePage> {
   GameSettings _settings = GameSettings(
-    mode: GameMode.aAudioToChar,
+    mode: GameMode.fWordChain,
     flavor: DataFlavor.enhanced,
-    playMode: PlayMode.scoreTarget,
-    goal: defaultGoalFor(PlayMode.scoreTarget),
+    playMode: PlayMode.timeAttack,
+    goal: defaultGoalFor(PlayMode.timeAttack),
   );
 
   Future<void> _openSettings() async {
@@ -181,7 +208,7 @@ class _HomePageState extends State<HomePage> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Bopomofo Game'),
+        title: const Text('注音遊戲'),
         actions: [
           IconButton(
             tooltip: '設定',
@@ -190,11 +217,26 @@ class _HomePageState extends State<HomePage> {
           ),
         ],
       ),
-      body: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
+      body: Container(
+        decoration: const BoxDecoration(
+          gradient: LinearGradient(
+            begin: Alignment.topCenter,
+            end: Alignment.bottomCenter,
+            colors: [Color(0xFFFFF1F7), Color(0xFFFFFFFF)],
+          ),
+        ),
+        child: Padding(
+          padding: const EdgeInsets.all(16),
+          child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
+            const SizedBox(height: 8),
+            Text(
+              '用遊戲練注音',
+              textAlign: TextAlign.center,
+              style: Theme.of(context).textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.w800),
+            ),
+            const SizedBox(height: 10),
             Card(
               child: Padding(
                 padding: const EdgeInsets.all(14),
@@ -231,6 +273,7 @@ class _HomePageState extends State<HomePage> {
               child: const Text('開始'),
             ),
           ],
+          ),
         ),
       ),
     );
@@ -341,9 +384,17 @@ class _SettingsPageState extends State<SettingsPage> {
           TextButton(onPressed: _save, child: const Text('儲存')),
         ],
       ),
-      body: ListView(
-        padding: const EdgeInsets.all(16),
-        children: [
+      body: Container(
+        decoration: const BoxDecoration(
+          gradient: LinearGradient(
+            begin: Alignment.topCenter,
+            end: Alignment.bottomCenter,
+            colors: [Color(0xFFFFF1F7), Color(0xFFFFFFFF)],
+          ),
+        ),
+        child: ListView(
+          padding: const EdgeInsets.all(16),
+          children: [
           const Text('資料庫', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w600)),
           const SizedBox(height: 8),
           SegmentedButton<DataFlavor>(
@@ -388,6 +439,12 @@ class _SettingsPageState extends State<SettingsPage> {
             title: const Text('E：看詞語選注音（詞語 → 注音）'),
           ),
           RadioListTile(
+            value: GameMode.fWordChain,
+            groupValue: _mode,
+            onChanged: (v) => setState(() => _mode = v!),
+            title: const Text('接龍填空：語詞接龍（選出下一個詞語）'),
+          ),
+          RadioListTile(
             value: GameMode.mix,
             groupValue: _mode,
             onChanged: (v) => setState(() => _mode = v!),
@@ -401,7 +458,7 @@ class _SettingsPageState extends State<SettingsPage> {
               ButtonSegment(value: PlayMode.practice, label: Text('練習')),
               ButtonSegment(value: PlayMode.scoreTarget, label: Text('目標分數')),
               ButtonSegment(value: PlayMode.correctTarget, label: Text('目標題數')),
-              ButtonSegment(value: PlayMode.timeAttack, label: Text('限時')),
+              ButtonSegment(value: PlayMode.timeAttack, label: Text('限時挑戰')),
               ButtonSegment(value: PlayMode.survival, label: Text('生存')),
             ],
             selected: {_playMode},
@@ -426,7 +483,8 @@ class _SettingsPageState extends State<SettingsPage> {
           ),
           const SizedBox(height: 16),
           FilledButton(onPressed: _save, child: const Text('儲存並返回')),
-        ],
+          ],
+        ),
       ),
     );
   }
@@ -470,6 +528,10 @@ class _GamePageState extends State<GamePage> {
   PairingRound? _qC;
   BopoToCharQuestion? _qD;
   WordToBopoQuestion? _qE;
+  WordChainQuestion? _qF;
+
+  // 接龍模式：上一題答對後，將答案作為下一題的 currentWord（形成連續接龍）
+  String? _chainCurrentWord;
 
   // 混合題型時，這一題實際使用的題型
   late GameMode _activeMode = widget.mode;
@@ -494,7 +556,12 @@ class _GamePageState extends State<GamePage> {
   Future<void> _init() async {
     final db = await DbService.open(flavor: widget.flavor);
     await _tts.setLanguage('zh-TW');
-    await _tts.setSpeechRate(0.45);
+    // 讓發音更清楚：放慢一點、音高略提高
+    await _tts.setSpeechRate(0.40);
+    await _tts.setPitch(1.05);
+    await _tts.setVolume(1.0);
+    // 盡量等朗讀完成（避免連續點擊時互相蓋掉）
+    await _tts.awaitSpeakCompletion(true);
     setState(() => _db = db);
 
     if (widget.playMode == PlayMode.survival) {
@@ -533,6 +600,7 @@ class _GamePageState extends State<GamePage> {
       GameMode.cPairing,
       GameMode.dBopoToChar,
       GameMode.eWordToBopo,
+      GameMode.fWordChain,
     ];
     pool.shuffle();
     return pool.first;
@@ -550,6 +618,7 @@ class _GamePageState extends State<GamePage> {
       _qC = null;
       _qD = null;
       _qE = null;
+      _qF = null;
       _pairingSelectedWord = null;
       _pairingMatchedWords.clear();
       _pairingMatchedBopos.clear();
@@ -582,6 +651,11 @@ class _GamePageState extends State<GamePage> {
       } else if (_activeMode == GameMode.eWordToBopo) {
         final q = await db.randomWordToBopoQuestion();
         setState(() => _qE = q);
+      } else if (_activeMode == GameMode.fWordChain) {
+        final q = await db.randomWordChainQuestion(currentWord: _chainCurrentWord);
+        setState(() => _qF = q);
+        // 為了清楚一點：自動唸出目前詞語（接龍提示）
+        await _tts.speak(q.currentWord);
       }
     } catch (e) {
       setState(() => _feedback = '出題失敗：$e');
@@ -593,6 +667,10 @@ class _GamePageState extends State<GamePage> {
       _questions += 1;
       _currentCounted = true;
       _streak = 0;
+      // 接龍若跳過，避免一直卡在同一個詞，改為下一題重新抽起始詞
+      if (_activeMode == GameMode.fWordChain) {
+        _chainCurrentWord = null;
+      }
     }
   }
 
@@ -678,8 +756,9 @@ class _GamePageState extends State<GamePage> {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Text('分數：$_score'),
-              Text('答對：$_correct / $_questions'),
-              Text('錯誤點擊：$_wrongTaps'),
+              Text('作答：$_questions 題'),
+              Text('答對：$_correct 次'),
+              Text('答錯：$_wrongTaps 次'),
               Text('最長連勝：$_bestStreak'),
               if (widget.playMode == PlayMode.survival) Text('剩餘生命：${_lives ?? 0}'),
             ],
@@ -717,7 +796,7 @@ class _GamePageState extends State<GamePage> {
   }
 
   ButtonStyle _styleForOption({required String opt, required String answer}) {
-    final correctColor = Colors.blue;
+    final correctColor = Colors.green;
     final wrongColor = Colors.red;
 
     if (_locked) {
@@ -746,15 +825,10 @@ class _GamePageState extends State<GamePage> {
 
   Widget _optionChild({required String opt, required String answer, double fontSize = 20}) {
     final isCorrect = _locked && opt == answer;
-    if (!isCorrect) return Text(opt, style: TextStyle(fontSize: fontSize));
-    return Row(
-      mainAxisAlignment: MainAxisAlignment.center,
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        Flexible(child: Text(opt, style: TextStyle(fontSize: fontSize, fontWeight: FontWeight.w700))),
-        const SizedBox(width: 6),
-        Icon(Icons.sentiment_satisfied_alt, size: fontSize, color: Colors.blue.shade700),
-      ],
+    return Text(
+      isCorrect ? '✓ $opt' : opt,
+      textAlign: TextAlign.center,
+      style: TextStyle(fontSize: fontSize, fontWeight: isCorrect ? FontWeight.w800 : FontWeight.w600),
     );
   }
 
@@ -768,6 +842,12 @@ class _GamePageState extends State<GamePage> {
       final firstTry = _wrongOptions.isEmpty;
       setState(() => _locked = true);
       _selectedCorrectOption = opt;
+      if (_activeMode == GameMode.fWordChain) {
+        // 接龍：下一題用本題答案當作 currentWord
+        _chainCurrentWord = opt;
+      } else {
+        _chainCurrentWord = null;
+      }
       _mark(true, firstTry: firstTry, countAsQuestion: true);
     } else {
       setState(() => _wrongOptions.add(opt));
@@ -809,17 +889,35 @@ class _GamePageState extends State<GamePage> {
               ),
             Padding(
               padding: const EdgeInsets.only(right: 16),
-              child: Center(child: Text('$_score 分｜$_correct/$_questions 題')),
+              child: Center(child: Text('$_score分｜✓$_correct｜✗$_wrongTaps｜$_questions題')),
             )
           ],
         ),
-        body: Padding(
-          padding: const EdgeInsets.all(16),
-          child: !dbReady
-              ? const Center(child: CircularProgressIndicator())
-              : Column(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
+        body: Container(
+          decoration: const BoxDecoration(
+            gradient: LinearGradient(
+              begin: Alignment.topCenter,
+              end: Alignment.bottomCenter,
+              colors: [Color(0xFFFFF1F7), Color(0xFFFFFFFF)],
+            ),
+          ),
+          child: Padding(
+            padding: const EdgeInsets.all(16),
+            child: !dbReady
+                ? const Center(child: CircularProgressIndicator())
+                : Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                    if (widget.playMode == PlayMode.timeAttack && _timeLeft != null) ...[
+                      ClipRRect(
+                        borderRadius: BorderRadius.circular(999),
+                        child: LinearProgressIndicator(
+                          minHeight: 10,
+                          value: (_timeLeft! / (widget.goal.timeLimitSec ?? 60)).clamp(0.0, 1.0),
+                        ),
+                      ),
+                      const SizedBox(height: 10),
+                    ],
                     if (_feedback != null) ...[
                       Text(_feedback!, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w700)),
                       const SizedBox(height: 10),
@@ -830,8 +928,9 @@ class _GamePageState extends State<GamePage> {
                       onPressed: _isFinished ? null : _next,
                       child: Text(_activeMode == GameMode.cPairing ? '下一輪 / 下一題' : '下一題'),
                     ),
-                  ],
-                ),
+                    ],
+                  ),
+          ),
         ),
       ),
     );
@@ -911,6 +1010,12 @@ class _GamePageState extends State<GamePage> {
                   ),
                 );
               }),
+              const SizedBox(height: 8),
+              OutlinedButton.icon(
+                onPressed: _isFinished ? null : () => _tts.speak(q.character),
+                icon: const Icon(Icons.volume_up),
+                label: const Text('唸一遍'),
+              ),
             ],
           ),
         );
@@ -1035,6 +1140,48 @@ class _GamePageState extends State<GamePage> {
                   ),
                 );
               }),
+              const SizedBox(height: 8),
+              OutlinedButton.icon(
+                onPressed: _isFinished ? null : () => _tts.speak(q.word),
+                icon: const Icon(Icons.volume_up),
+                label: const Text('唸一遍'),
+              ),
+            ],
+          ),
+        );
+      case GameMode.fWordChain:
+        final q = _qF;
+        if (q == null) return const Center(child: CircularProgressIndicator());
+        return SingleChildScrollView(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Text('語詞接龍：選出下一個詞語', style: Theme.of(context).textTheme.titleMedium),
+              const SizedBox(height: 12),
+              Text('目前詞語', style: Theme.of(context).textTheme.bodyMedium?.copyWith(fontWeight: FontWeight.w700)),
+              const SizedBox(height: 6),
+              Center(child: Text(q.currentWord, style: const TextStyle(fontSize: 46, fontWeight: FontWeight.w900))),
+              const SizedBox(height: 10),
+              Text('下一個詞語要以「${q.targetStartChar}」開頭：', style: const TextStyle(color: Colors.black87)),
+              const SizedBox(height: 10),
+              ...q.options.map((opt) {
+                return Padding(
+                  padding: const EdgeInsets.only(bottom: 10),
+                  child: FilledButton.tonal(
+                    style: _styleForOption(opt: opt, answer: q.answerWord),
+                    onPressed: (_locked || _isFinished || _wrongOptions.contains(opt))
+                        ? null
+                        : () => _tapOption(opt: opt, answer: q.answerWord),
+                    child: _optionChild(opt: opt, answer: q.answerWord, fontSize: 22),
+                  ),
+                );
+              }),
+              const SizedBox(height: 8),
+              OutlinedButton.icon(
+                onPressed: _isFinished ? null : () => _tts.speak(q.currentWord),
+                icon: const Icon(Icons.volume_up),
+                label: const Text('再聽一次'),
+              ),
             ],
           ),
         );
