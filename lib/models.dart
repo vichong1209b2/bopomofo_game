@@ -40,6 +40,32 @@ class CharToBopoQuestion {
   });
 }
 
+class BopoToCharQuestion {
+  final String bopomofo;
+  final String answerChar;
+  final List<String> options;
+
+  BopoToCharQuestion({
+    required this.bopomofo,
+    required this.answerChar,
+    required this.options,
+  });
+}
+
+class WordToBopoQuestion {
+  final int wordId;
+  final String word;
+  final String answerBopomofo;
+  final List<String> options;
+
+  WordToBopoQuestion({
+    required this.wordId,
+    required this.word,
+    required this.answerBopomofo,
+    required this.options,
+  });
+}
+
 class PairingRound {
   final List<String> words; // shuffled
   final List<String> bopomos; // shuffled
@@ -51,4 +77,3 @@ class PairingRound {
     required this.answerMap,
   });
 }
-

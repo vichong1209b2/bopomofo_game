@@ -145,6 +145,71 @@ class DbService {
     return CharToBopoQuestion(character: ch, answerBopomofo: answer, options: options);
   }
 
+  // ====== 題型 D：看注音選字（Bopo → Char） ======
+
+  Future<BopoToCharQuestion> randomBopoToCharQuestion({int optionCount = 4}) async {
+    final rows = await _db.rawQuery(r'''
+      SELECT cp.bopomofo AS bopo, c.char AS ch
+      FROM character_pronunciation cp
+      JOIN character c ON c.char_id = cp.char_id
+      WHERE cp.game_priority != 'low'
+        AND c.game_priority != 'low'
+        AND cp.bopomofo != ''
+      ORDER BY RANDOM()
+      LIMIT 1
+    ''');
+    if (rows.isEmpty) {
+      throw StateError('找不到可用的「注音→選字」題目。');
+    }
+
+    final bopomofo = rows.first['bopo'] as String;
+    final answerChar = rows.first['ch'] as String;
+
+    final other = await _db.rawQuery(r'''
+      SELECT c.char AS ch
+      FROM character c
+      WHERE c.game_priority != 'low'
+        AND c.char != ?
+      ORDER BY RANDOM()
+      LIMIT ?
+    ''', [answerChar, optionCount - 1]);
+
+    final options = <String>[answerChar, ...other.map((e) => e['ch'] as String)]..shuffle(Random());
+    return BopoToCharQuestion(bopomofo: bopomofo, answerChar: answerChar, options: options);
+  }
+
+  // ====== 題型 E：看詞語選注音（Word → Bopo） ======
+
+  Future<WordToBopoQuestion> randomWordToBopoQuestion({int optionCount = 4}) async {
+    final rows = await _db.rawQuery(r'''
+      SELECT w.word_id, w.word, w.bopomofo
+      FROM word w
+      WHERE w.game_priority != 'low'
+        AND w.bopomofo != ''
+      ORDER BY RANDOM()
+      LIMIT 1
+    ''');
+    if (rows.isEmpty) {
+      throw StateError('找不到可用的「詞語→選注音」題目。');
+    }
+
+    final wordId = rows.first['word_id'] as int;
+    final word = rows.first['word'] as String;
+    final answer = (rows.first['bopomofo'] as String?) ?? '';
+
+    final other = await _db.rawQuery(r'''
+      SELECT DISTINCT bopomofo
+      FROM word
+      WHERE bopomofo != ''
+        AND bopomofo != ?
+      ORDER BY RANDOM()
+      LIMIT ?
+    ''', [answer, optionCount - 1]);
+
+    final options = <String>[answer, ...other.map((e) => e['bopomofo'] as String)]..shuffle(Random());
+    return WordToBopoQuestion(wordId: wordId, word: word, answerBopomofo: answer, options: options);
+  }
+
   // ====== 題型 C：配對（詞語 ↔ 注音） ======
 
   Future<PairingRound> randomPairingRound({int pairCount = 4}) async {
@@ -188,4 +253,3 @@ class DbService {
     return "他";
   }
 }
-
