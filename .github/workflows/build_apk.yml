@@ -1,1 +1,44 @@
+name: build-android-apk
+
+on:
+  push:
+    branches: [ "main" ]
+  workflow_dispatch: {}
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: "temurin"
+          java-version: "17"
+
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: "stable"
+          cache: true
+
+      - name: Bootstrap project
+        run: |
+          bash bootstrap_project.sh
+
+      - name: Pub get
+        working-directory: bopomofo_game
+        run: flutter pub get
+
+      - name: Build APK (release)
+        working-directory: bopomofo_game
+        run: flutter build apk --release
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: app-release-apk
+          path: bopomofo_game/build/app/outputs/flutter-apk/app-release.apk
 
