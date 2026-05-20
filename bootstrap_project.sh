@@ -18,10 +18,39 @@ else
   flutter create "${APP_DIR}"
 fi
 
+# 設定 Android 桌面顯示名稱（App label）
+python3 - <<'PY'
+from pathlib import Path
+import re
+
+app_dir = Path("bopomofo_game")
+label = "注音遊戲"
+
+manifest = app_dir / "android/app/src/main/AndroidManifest.xml"
+if manifest.exists():
+  s = manifest.read_text(encoding="utf-8")
+  # android:label="xxx" → android:label="注音遊戲"
+  s2 = re.sub(r'android:label="[^"]*"', f'android:label="{label}"', s)
+  manifest.write_text(s2, encoding="utf-8")
+
+strings = app_dir / "android/app/src/main/res/values/strings.xml"
+if strings.exists():
+  s = strings.read_text(encoding="utf-8")
+  s2 = re.sub(r'(<string\\s+name=\"app_name\">)(.*?)(</string>)', rf'\\1{label}\\3', s)
+  strings.write_text(s2, encoding="utf-8")
+PY
+
 cp -r ./lib "${APP_DIR}/"
 cp -r ./assets "${APP_DIR}/"
 cp ./pubspec.yaml "${APP_DIR}/pubspec.yaml"
 
+# 覆蓋 Android 桌面圖示（避免需要額外的 workflow 權限）
+ICON_RES_SRC="./assets/icon/android_res"
+ICON_RES_DST="${APP_DIR}/android/app/src/main/res"
+if [ -d "${ICON_RES_SRC}" ] && [ -d "${ICON_RES_DST}" ]; then
+  cp -r "${ICON_RES_SRC}/." "${ICON_RES_DST}/"
+  echo "已更新 Android 桌面圖示"
+fi
+
 echo "完成：已建立/更新 ${APP_DIR}/"
 echo "下一步：cd ${APP_DIR} && flutter pub get && flutter build apk --release"
-

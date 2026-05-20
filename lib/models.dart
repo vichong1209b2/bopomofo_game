@@ -77,3 +77,21 @@ class PairingRound {
     required this.answerMap,
   });
 }
+
+/// 語詞接龍（填空/選擇）：
+/// - 顯示 currentWord
+/// - 下一個詞語必須以 targetStartChar 開頭
+/// - 本題只有一個正確選項 answerWord（其他選項不以 targetStartChar 開頭）
+class WordChainQuestion {
+  final String currentWord;
+  final String targetStartChar;
+  final String answerWord;
+  final List<String> options;
+
+  WordChainQuestion({
+    required this.currentWord,
+    required this.targetStartChar,
+    required this.answerWord,
+    required this.options,
+  });
+}

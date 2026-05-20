@@ -361,6 +361,106 @@ class DbService {
     return PairingRound(words: words, bopomos: bopomos, answerMap: answerMap);
   }
 
+  // ====== 題型 F：語詞接龍（填空/選擇） ======
+
+  /// 產生「接龍」題目：顯示 currentWord，下一個詞語必須以 lastChar 開頭。
+  ///
+  /// - 若傳入 currentWord，會以它的最後一字作為接龍條件
+  /// - 否則會自動挑一個「有後繼」的詞語當作 currentWord
+  Future<WordChainQuestion> randomWordChainQuestion({
+    String? currentWord,
+    int optionCount = 4,
+  }) async {
+    String baseWord = currentWord ?? '';
+
+    if (baseWord.isEmpty) {
+      // 挑一個「最後一字能接到其他詞語」的詞語，避免出題後無解
+      final rows = await _db.rawQuery(r'''
+        SELECT w.word AS w
+        FROM word w
+        WHERE w.game_priority != 'low'
+          AND w.is_common = 1
+          AND length(w.word) BETWEEN 2 AND 6
+          AND EXISTS (
+            SELECT 1
+            FROM word w2
+            WHERE w2.game_priority != 'low'
+              AND w2.is_common = 1
+              AND w2.word != w.word
+              AND substr(w2.word, 1, 1) = substr(w.word, length(w.word), 1)
+          )
+        ORDER BY RANDOM()
+        LIMIT 1
+      ''');
+      if (rows.isEmpty) {
+        throw StateError('找不到可用的接龍詞語（請確認資料庫 word 表存在且有 common 標記）。');
+      }
+      baseWord = rows.first['w'] as String;
+    }
+
+    final lastCharRows = await _db.rawQuery(r'''
+      SELECT substr(?, length(?), 1) AS last_char
+    ''', [baseWord, baseWord]);
+    final lastChar = (lastCharRows.first['last_char'] as String?) ?? '';
+    if (lastChar.isEmpty) {
+      throw StateError('接龍出題失敗：無法取得詞語最後一字。');
+    }
+
+    // 正解：必須以 lastChar 開頭
+    final answerRows = await _db.rawQuery(r'''
+      SELECT w2.word AS w
+      FROM word w2
+      WHERE w2.game_priority != 'low'
+        AND w2.is_common = 1
+        AND w2.word != ?
+        AND length(w2.word) BETWEEN 2 AND 6
+        AND substr(w2.word, 1, 1) = ?
+      ORDER BY RANDOM()
+      LIMIT 1
+    ''', [baseWord, lastChar]);
+    if (answerRows.isEmpty) {
+      // fallback：若 baseWord 是使用者指定、剛好接不到，就改抽一個能接的
+      if (currentWord != null) {
+        return randomWordChainQuestion(currentWord: null, optionCount: optionCount);
+      }
+      throw StateError('找不到可接「$lastChar」開頭的詞語。');
+    }
+    final answerWord = answerRows.first['w'] as String;
+
+    // 干擾：不以 lastChar 開頭
+    final distractors = <String>[];
+    final tries = 36;
+    for (var t = 0; t < tries && distractors.length < optionCount - 1; t++) {
+      final r = await _db.rawQuery(r'''
+        SELECT w.word AS w
+        FROM word w
+        WHERE w.game_priority != 'low'
+          AND w.is_common = 1
+          AND length(w.word) BETWEEN 2 AND 6
+          AND w.word != ?
+          AND substr(w.word, 1, 1) != ?
+        ORDER BY RANDOM()
+        LIMIT 1
+      ''', [answerWord, lastChar]);
+      if (r.isEmpty) continue;
+      final w = r.first['w'] as String;
+      if (distractors.contains(w)) continue;
+      distractors.add(w);
+    }
+
+    while (distractors.length < optionCount - 1) {
+      distractors.add(_randomCjkCharFallback(exclude: {answerWord, ...distractors}));
+    }
+
+    final options = <String>[answerWord, ...distractors]..shuffle(Random());
+    return WordChainQuestion(
+      currentWord: baseWord,
+      targetStartChar: lastChar,
+      answerWord: answerWord,
+      options: options,
+    );
+  }
+
   // ====== helpers ======
 
   static const _toneMarks = ['˙', 'ˊ', 'ˇ', 'ˋ'];

@@ -25,4 +25,4 @@ flutter:
   assets:
     - assets/db/moe_enhanced.db
     - assets/db/moe_raw.db
-
+    - assets/icon/app_icon.png
