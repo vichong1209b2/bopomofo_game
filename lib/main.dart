@@ -26,7 +26,7 @@ class BopoGameApp extends StatelessWidget {
           foregroundColor: scheme.onPrimaryContainer,
           centerTitle: true,
         ),
-        cardTheme: CardTheme(
+        cardTheme: CardThemeData(
           color: scheme.surfaceContainerHighest,
           elevation: 0.5,
           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
