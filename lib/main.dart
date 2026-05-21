@@ -671,6 +671,7 @@ class _GamePageState extends State<GamePage> {
   final FlutterTts _tts = FlutterTts();
   String? _initError;
   bool _ttsReady = false;
+  late int _audioHintsLeft;
 
   int _score = 0;
   int _questions = 0; // 作答題數：每題/每輪只算 1 次（答錯重試不會一直 +1）
@@ -711,6 +712,7 @@ class _GamePageState extends State<GamePage> {
   @override
   void initState() {
     super.initState();
+    _audioHintsLeft = audioHintLimitForLevel(widget.level);
     _init();
   }
 
@@ -761,6 +763,22 @@ class _GamePageState extends State<GamePage> {
       if (!mounted) return;
       setState(() => _initError = e.toString());
     }
+  }
+
+  bool get _canUseAudioHint => !_isFinished && _ttsReady && _audioHintsLeft > 0;
+
+  Future<void> _useAudioHint(String text) async {
+    if (_isFinished) return;
+    if (!_ttsReady) {
+      if (mounted) setState(() => _feedback = '語音不可用（TTS 初始化失敗）');
+      return;
+    }
+    if (_audioHintsLeft <= 0) {
+      if (mounted) setState(() => _feedback = '發音提示次數已用完');
+      return;
+    }
+    setState(() => _audioHintsLeft -= 1);
+    await _tts.speak(text);
   }
 
   @override
@@ -987,20 +1005,20 @@ class _GamePageState extends State<GamePage> {
       ThemeStyle.sakura => (const Color(0xFF2E7D32), const Color(0xFFC62828)),
       ThemeStyle.ocean => (const Color(0xFF00695C), const Color(0xFFB71C1C)),
       ThemeStyle.forest => (const Color(0xFF1B5E20), const Color(0xFFC62828)),
-      ThemeStyle.night => (const Color(0xFF1565C0), const Color(0xFFD32F2F)),
+      ThemeStyle.night => (const Color(0xFF2E7D32), const Color(0xFFD32F2F)),
     };
 
     if (_locked) {
       if (opt == answer) {
         return FilledButton.styleFrom(
-          backgroundColor: correctColor.withOpacity(0.38), // 更顯眼
+          backgroundColor: correctColor.withOpacity(0.24),
           foregroundColor: Colors.white,
           side: BorderSide(color: correctColor.withOpacity(0.85), width: 1.2),
         );
       }
       if (_wrongOptions.contains(opt)) {
         return FilledButton.styleFrom(
-          backgroundColor: wrongColor.withOpacity(0.30),
+          backgroundColor: wrongColor.withOpacity(0.22),
           foregroundColor: Colors.white,
           side: BorderSide(color: wrongColor.withOpacity(0.75), width: 1.0),
         );
@@ -1008,7 +1026,7 @@ class _GamePageState extends State<GamePage> {
     } else {
       if (_wrongOptions.contains(opt)) {
         return FilledButton.styleFrom(
-          backgroundColor: wrongColor.withOpacity(0.30),
+          backgroundColor: wrongColor.withOpacity(0.22),
           foregroundColor: Colors.white,
           side: BorderSide(color: wrongColor.withOpacity(0.75), width: 1.0),
         );
@@ -1209,9 +1227,9 @@ class _GamePageState extends State<GamePage> {
               ),
               const SizedBox(height: 10),
               OutlinedButton.icon(
-                onPressed: _isFinished ? null : () => _tts.speak(q.word),
+                onPressed: _canUseAudioHint ? () => _useAudioHint(q.word) : null,
                 icon: const Icon(Icons.volume_up),
-                label: const Text('再聽一次'),
+                label: Text('再聽一次（剩$_audioHintsLeft）'),
               ),
             ],
           ),
@@ -1224,6 +1242,10 @@ class _GamePageState extends State<GamePage> {
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
               Text('看字選音：', style: Theme.of(context).textTheme.titleMedium),
+              if (q.contextWord != null) ...[
+                const SizedBox(height: 8),
+                Text('語境：${q.contextWord}', style: const TextStyle(color: Colors.black54, fontWeight: FontWeight.w600)),
+              ],
               const SizedBox(height: 10),
               Center(child: Text(q.character, style: const TextStyle(fontSize: 64, fontWeight: FontWeight.w800))),
               const SizedBox(height: 12),
@@ -1241,9 +1263,9 @@ class _GamePageState extends State<GamePage> {
               }),
               const SizedBox(height: 8),
               OutlinedButton.icon(
-                onPressed: _isFinished ? null : () => _tts.speak(q.character),
+                onPressed: _canUseAudioHint ? () => _useAudioHint(q.character) : null,
                 icon: const Icon(Icons.volume_up),
-                label: const Text('唸一遍'),
+                label: Text('唸一遍（剩$_audioHintsLeft）'),
               ),
             ],
           ),
@@ -1376,9 +1398,9 @@ class _GamePageState extends State<GamePage> {
               }),
               const SizedBox(height: 8),
               OutlinedButton.icon(
-                onPressed: _isFinished ? null : () => _tts.speak(q.word),
+                onPressed: _canUseAudioHint ? () => _useAudioHint(q.word) : null,
                 icon: const Icon(Icons.volume_up),
-                label: const Text('唸一遍'),
+                label: Text('唸一遍（剩$_audioHintsLeft）'),
               ),
             ],
           ),
@@ -1412,9 +1434,9 @@ class _GamePageState extends State<GamePage> {
               }),
               const SizedBox(height: 8),
               OutlinedButton.icon(
-                onPressed: _isFinished ? null : () => _tts.speak(q.currentWord),
+                onPressed: _canUseAudioHint ? () => _useAudioHint(q.currentWord) : null,
                 icon: const Icon(Icons.volume_up),
-                label: const Text('再聽一次'),
+                label: Text('再聽一次（剩$_audioHintsLeft）'),
               ),
             ],
           ),

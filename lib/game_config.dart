@@ -107,3 +107,28 @@ LevelRule ruleForLevel(EducationLevel level) {
   }
 }
 
+/// 「發音提示/聽音」的可用次數（每局遊戲）。
+///
+/// 設計：等級越高次數越少，讓玩法更像遊戲資源管理。
+int audioHintLimitForLevel(EducationLevel level) {
+  switch (level) {
+    case EducationLevel.elementary:
+      return 5;
+    case EducationLevel.juniorHigh:
+      return 4;
+    case EducationLevel.seniorHigh:
+      return 3;
+    case EducationLevel.university:
+      return 2;
+    case EducationLevel.graduate:
+      return 2;
+    case EducationLevel.working:
+      return 1;
+    case EducationLevel.expert:
+      return 1;
+    case EducationLevel.scholar:
+      return 1;
+    case EducationLevel.master:
+      return 1;
+  }
+}

@@ -267,6 +267,7 @@ class DbService {
     final cpFilter = _cpLevelWhere(level, alias: 'cp');
     List<Map<String, Object?>> rows = const [];
     String? usedNote;
+    String? contextWord;
     for (final cand in _charLevelWhereCandidates(level, alias: 'c')) {
       rows = await _db.rawQuery(r'''
       SELECT c.char AS ch, cp.bopomofo AS bopo
@@ -287,8 +288,39 @@ class DbService {
         break;
       }
     }
+
+    // 若該等級剛好沒有足夠「單音字」可用，改用「詞語語境」提供去歧義（避免完全沒題目）。
     if (rows.isEmpty) {
-      throw StateError('找不到可用的單音字題目。');
+      for (final cand in _wordLevelWhereCandidates(level, alias: 'w')) {
+        rows = await _db.rawQuery(r'''
+        SELECT c.char AS ch, cp.bopomofo AS bopo, w.word AS w
+        FROM word_char wc
+        JOIN word w ON w.word_id = wc.word_id
+        JOIN character c ON c.char_id = wc.char_id
+        JOIN character_pronunciation cp ON cp.cp_id = wc.cp_id
+        WHERE ''' +
+            cand.where +
+            r'''
+          AND wc.cp_id IS NOT NULL
+          AND cp.bopomofo != ''
+          AND ''' +
+            cpFilter.where +
+            r'''
+          AND w.is_common = 1
+          AND length(w.word) BETWEEN 2 AND 6
+        ORDER BY RANDOM()
+        LIMIT 1
+      ''', [...cand.args, ...cpFilter.args]);
+        if (rows.isNotEmpty) {
+          usedNote = cand.note;
+          contextWord = rows.first['w'] as String?;
+          break;
+        }
+      }
+    }
+
+    if (rows.isEmpty) {
+      throw StateError('找不到可用的「看字選音」題目。');
     }
     if (usedNote != null && usedNote != 'base') {
       AppLogger.log('[DB] B fallback level=$level note=$usedNote');
@@ -344,7 +376,12 @@ class DbService {
     }
 
     final options = <String>[answer, ...distractors]..shuffle(Random());
-    return CharToBopoQuestion(character: ch, answerBopomofo: answer, options: options);
+    return CharToBopoQuestion(
+      character: ch,
+      answerBopomofo: answer,
+      options: options,
+      contextWord: contextWord,
+    );
   }
 
   // ====== 題型 D：看注音選字（Bopo → Char） ======
@@ -365,7 +402,7 @@ class DbService {
         cand.where +
         r'''
         AND ''' +
-        cFilter.where +
+        cpFilter.where +
         r'''
         AND cp.bopomofo != ''
       ORDER BY RANDOM()
@@ -608,8 +645,10 @@ class DbService {
     EducationLevel level = EducationLevel.juniorHigh,
   }) async {
     String baseWord = currentWord ?? '';
-    final wFilter = _wordLevelWhere(level, alias: 'w');
-    final w2Filter = _wordLevelWhere(level, alias: 'w2');
+    final wCandidates = _wordLevelWhereCandidates(level, alias: 'w');
+    final w2Candidates = _wordLevelWhereCandidates(level, alias: 'w2');
+    String? usedNote;
+    String? usedNoteNext;
 
     // ⚠️ #18 開始卡住的主因：原本用 EXISTS + ORDER BY RANDOM 的「保證有後繼」挑字，
     // 在部分手機/資料量下會非常慢（看起來像 DB 卡住）。
@@ -624,50 +663,79 @@ class DbService {
     }
 
     Future<String?> _randomNextWord(String base, String lastChar) async {
-      final answerRows = await _db.rawQuery(r'''
-        SELECT w2.word AS w
-        FROM word w2
-        WHERE ''' +
-          w2Filter.where +
-          r'''
-          AND w2.is_common = 1
-          AND w2.word != ?
-          AND length(w2.word) BETWEEN 2 AND 6
-          AND substr(w2.word, 1, 1) = ?
+      for (final cand in w2Candidates) {
+        final answerRows = await _db.rawQuery(r'''
+          SELECT w2.word AS w
+          FROM word w2
+          WHERE ''' +
+            cand.where +
+            r'''
+            AND w2.is_common = 1
+            AND w2.word != ?
+            AND length(w2.word) BETWEEN 2 AND 6
+            AND substr(w2.word, 1, 1) = ?
+          ORDER BY RANDOM()
+          LIMIT 1
+        ''', [...cand.args, base, lastChar]);
+        if (answerRows.isNotEmpty) {
+          usedNoteNext = cand.note;
+          return answerRows.first['w'] as String;
+        }
+      }
+      return null;
+    }
+
+    Future<String?> _randomWrongWordFallback({required String notStartChar, required Set<String> exclude}) async {
+      // 保底：從常用詞中撈一批，挑一個不是答案/不是 base，且不是指定開頭的詞。
+      final pool = await _db.rawQuery(r'''
+        SELECT w.word AS w
+        FROM word w
+        WHERE w.is_common = 1
+          AND length(w.word) BETWEEN 2 AND 6
+          AND substr(w.word, 1, 1) != ?
         ORDER BY RANDOM()
-        LIMIT 1
-      ''', [...w2Filter.args, base, lastChar]);
-      if (answerRows.isEmpty) return null;
-      return answerRows.first['w'] as String;
+        LIMIT 80
+      ''', [notStartChar]);
+      for (final row in pool) {
+        final w = row['w'] as String? ?? '';
+        if (w.isEmpty) continue;
+        if (exclude.contains(w)) continue;
+        return w;
+      }
+      return null;
     }
 
     String lastChar = '';
     String answerWord = '';
 
     if (baseWord.isEmpty) {
-      const maxPickTries = 40;
-      for (var i = 0; i < maxPickTries; i++) {
-        final rows = await _db.rawQuery(r'''
-          SELECT w.word AS w
-          FROM word w
-          WHERE ''' +
-            wFilter.where +
-            r'''
-            AND w.is_common = 1
-            AND length(w.word) BETWEEN 2 AND 6
-          ORDER BY RANDOM()
-          LIMIT 1
-        ''', wFilter.args);
-        if (rows.isEmpty) break;
-        final cand = rows.first['w'] as String;
-        final lc = await _lastCharOf(cand);
-        if (lc.isEmpty) continue;
-        final ans = await _randomNextWord(cand, lc);
-        if (ans == null) continue;
-        baseWord = cand;
-        lastChar = lc;
-        answerWord = ans;
-        break;
+      const maxPickTriesPerRule = 24;
+      for (final candRule in wCandidates) {
+        for (var i = 0; i < maxPickTriesPerRule; i++) {
+          final rows = await _db.rawQuery(r'''
+            SELECT w.word AS w
+            FROM word w
+            WHERE ''' +
+              candRule.where +
+              r'''
+              AND w.is_common = 1
+              AND length(w.word) BETWEEN 2 AND 6
+            ORDER BY RANDOM()
+            LIMIT 1
+          ''', candRule.args);
+          if (rows.isEmpty) break;
+          final cand = rows.first['w'] as String;
+          final lc = await _lastCharOf(cand);
+          if (lc.isEmpty) continue;
+          final ans = await _randomNextWord(cand, lc);
+          if (ans == null) continue;
+          baseWord = cand;
+          lastChar = lc;
+          answerWord = ans;
+          usedNote = candRule.note;
+          break;
+        }
+        if (answerWord.isNotEmpty) break;
       }
       if (answerWord.isEmpty) {
         throw StateError('找不到可用的接龍詞語（請確認資料庫 word 表存在且有 common 標記）。');
@@ -688,24 +756,30 @@ class DbService {
       answerWord = ans;
     }
 
+    if (usedNote != null && usedNote != 'base') {
+      AppLogger.log('[DB] F fallback level=$level note=$usedNote nextNote=${usedNoteNext ?? "base"}');
+    }
+
     // 干擾：不以 lastChar 開頭
     final distractors = <String>[];
     final need = max(0, optionCount - 1);
     if (need > 0) {
+      // 先用 base rule 撈，若不足再用保底填滿
+      final baseRule = wCandidates.first;
       final r = await _db.rawQuery(r'''
-        SELECT w.word AS w
-        FROM word w
-        WHERE ''' +
-          wFilter.where +
-          r'''
-          AND w.is_common = 1
-          AND length(w.word) BETWEEN 2 AND 6
-          AND w.word != ?
-          AND w.word != ?
-          AND substr(w.word, 1, 1) != ?
-        ORDER BY RANDOM()
-        LIMIT ?
-      ''', [...wFilter.args, baseWord, answerWord, lastChar, need]);
+          SELECT w.word AS w
+          FROM word w
+          WHERE ''' +
+            baseRule.where +
+            r'''
+            AND w.is_common = 1
+            AND length(w.word) BETWEEN 2 AND 6
+            AND w.word != ?
+            AND w.word != ?
+            AND substr(w.word, 1, 1) != ?
+          ORDER BY RANDOM()
+          LIMIT ?
+        ''', [...baseRule.args, baseWord, answerWord, lastChar, need]);
       for (final row in r) {
         final w = row['w'] as String;
         if (w == answerWord) continue;
@@ -715,7 +789,17 @@ class DbService {
     }
 
     while (distractors.length < optionCount - 1) {
-      distractors.add(_randomCjkCharFallback(exclude: {answerWord, ...distractors}));
+      final w = await _randomWrongWordFallback(
+        notStartChar: lastChar,
+        exclude: {baseWord, answerWord, ...distractors},
+      );
+      if (w == null) break;
+      distractors.add(w);
+    }
+
+    // 最後保底（理論上很少發生）：若資料庫不足，至少避免 crash
+    while (distractors.length < optionCount - 1) {
+      distractors.add('（無）');
     }
 
     final options = <String>[answerWord, ...distractors]..shuffle(Random());
