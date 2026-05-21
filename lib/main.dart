@@ -1,13 +1,26 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_tts/flutter_tts.dart';
 
 import 'db/db_service.dart';
+import 'debug/app_logger.dart';
+import 'debug/log_page.dart';
 import 'game_config.dart';
 import 'models.dart';
 
 void main() {
-  runApp(const BopoGameApp());
+  WidgetsFlutterBinding.ensureInitialized();
+  runZonedGuarded(() async {
+    await AppLogger.ensureInitialized();
+    FlutterError.onError = (details) {
+      FlutterError.presentError(details);
+      AppLogger.log('[FlutterError] ${details.exceptionAsString()}\n${details.stack}');
+    };
+    runApp(const BopoGameApp());
+  }, (e, st) {
+    AppLogger.log('[ZoneError] $e\n$st');
+  });
 }
 
 class BopoGameApp extends StatelessWidget {
@@ -298,6 +311,13 @@ class _HomePageState extends State<HomePage> {
       appBar: AppBar(
         title: const Text('注音遊戲'),
         actions: [
+          IconButton(
+            tooltip: '日誌',
+            onPressed: () {
+              Navigator.of(context).push(MaterialPageRoute(builder: (_) => const LogPage(title: '程式日誌')));
+            },
+            icon: const Icon(Icons.article_outlined),
+          ),
           IconButton(
             tooltip: '設定',
             onPressed: _openSettings,
