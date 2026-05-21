@@ -7,6 +7,7 @@ import 'package:path_provider/path_provider.dart';
 import 'package:sqflite/sqflite.dart';
 
 import '../game_config.dart';
+import '../debug/app_logger.dart';
 import '../models.dart';
 
 enum DataFlavor { enhanced, raw }
@@ -63,6 +64,65 @@ class DbService {
     return (where: parts.join(' AND '), args: args);
   }
 
+  /// 等級過濾：嘗試用嚴格規則；若該等級在資料庫標記不足（例如 primary/common 欄位不完整）
+  /// 導致完全無法出題，會逐步放寬條件，確保「所有等級都有題目可玩」。
+  static List<({String where, List<Object?> args, String note})> _wordLevelWhereCandidates(
+    EducationLevel level, {
+    String alias = 'w',
+  }) {
+    final out = <({String where, List<Object?> args, String note})>[];
+
+    // 1) 原本規則（最符合等級設計）
+    final base = _wordLevelWhere(level, alias: alias);
+    out.add((where: base.where, args: base.args, note: 'base'));
+
+    // 2) 放寬：移除 primary/common 的硬性限制（仍保留 difficulty 與 priority）
+    final r = ruleForLevel(level);
+    final parts = <String>['$alias.difficulty <= ?'];
+    final args = <Object?>[r.maxWordDifficulty];
+    if (!r.includeLowPriorityWords) {
+      parts.add("$alias.game_priority != 'low'");
+    }
+    out.add((where: parts.join(' AND '), args: args, note: 'relax-primary-common'));
+
+    // 3) 放寬：提高 difficulty 到 5（仍保留 priority）
+    final parts2 = <String>['$alias.difficulty <= 5'];
+    if (!r.includeLowPriorityWords) {
+      parts2.add("$alias.game_priority != 'low'");
+    }
+    out.add((where: parts2.join(' AND '), args: const <Object?>[], note: 'relax-difficulty'));
+
+    // 4) 最放寬：不限制 priority（只保留基本欄位存在）
+    out.add((where: '$alias.difficulty <= 5', args: const <Object?>[], note: 'relax-priority'));
+
+    // 5) 完全不限制（最後保底）
+    out.add((where: '1=1', args: const <Object?>[], note: 'no-filter'));
+
+    return out;
+  }
+
+  static List<({String where, List<Object?> args, String note})> _charLevelWhereCandidates(
+    EducationLevel level, {
+    String alias = 'c',
+  }) {
+    final out = <({String where, List<Object?> args, String note})>[];
+
+    final base = _charLevelWhere(level, alias: alias);
+    out.add((where: base.where, args: base.args, note: 'base'));
+
+    // 放寬：移除 primary/common 限制（保留 priority）
+    final r = ruleForLevel(level);
+    final parts = <String>[];
+    if (!r.includeLowPriorityChars) {
+      parts.add("$alias.game_priority != 'low'");
+    }
+    out.add((where: parts.isEmpty ? '1=1' : parts.join(' AND '), args: const <Object?>[], note: 'relax-primary-common'));
+
+    // 放寬：不限制 priority
+    out.add((where: '1=1', args: const <Object?>[], note: 'no-filter'));
+    return out;
+  }
+
   static ({String where, List<Object?> args}) _charLevelWhere(EducationLevel level, {String alias = 'c'}) {
     final r = ruleForLevel(level);
     final parts = <String>[];
@@ -95,23 +155,43 @@ class DbService {
     int optionCount = 4,
     EducationLevel level = EducationLevel.juniorHigh,
   }) async {
-    final wFilter = _wordLevelWhere(level, alias: 'w');
-    final w = await _db.rawQuery(r'''
-      SELECT w.word_id, w.word, w.bopomofo
-      FROM word w
-      WHERE ''' +
-        wFilter.where +
-        r'''
-        AND w.allow_audio_to_char = 1
+    List<Map<String, Object?>> w = const [];
+    String? usedNote;
+    bool usedAllowFlag = true;
+
+    // 先試 allow_audio_to_char=1；若完全抓不到，再放寬移除 allow flag
+    for (final withAllow in [true, false]) {
+      for (final cand in _wordLevelWhereCandidates(level, alias: 'w')) {
+        final where = cand.where +
+            (withAllow ? " AND w.allow_audio_to_char = 1" : "") +
+            r'''
         AND EXISTS (
           SELECT 1 FROM word_char wc
           WHERE wc.word_id = w.word_id AND wc.cp_id IS NOT NULL
-        )
+        )''';
+        w = await _db.rawQuery(r'''
+      SELECT w.word_id, w.word, w.bopomofo
+      FROM word w
+      WHERE ''' +
+            where +
+            r'''
       ORDER BY RANDOM()
       LIMIT 1
-    ''', wFilter.args);
+    ''', cand.args);
+        if (w.isNotEmpty) {
+          usedNote = cand.note;
+          usedAllowFlag = withAllow;
+          break;
+        }
+      }
+      if (w.isNotEmpty) break;
+    }
+
     if (w.isEmpty) {
-      throw StateError('找不到可用的詞語（請確認資料庫已包含 enhanced schema）。');
+      throw StateError('找不到可用的詞語（題型 A 需要 word_char.cp_id 對應）。');
+    }
+    if (usedNote != null && usedNote != 'base') {
+      AppLogger.log('[DB] A fallback level=$level note=$usedNote allowFlag=$usedAllowFlag');
     }
 
     final wordId = (w.first['word_id'] as int);
@@ -184,14 +264,16 @@ class DbService {
     int optionCount = 4,
     EducationLevel level = EducationLevel.juniorHigh,
   }) async {
-    final cFilter = _charLevelWhere(level, alias: 'c');
     final cpFilter = _cpLevelWhere(level, alias: 'cp');
-    final rows = await _db.rawQuery(r'''
+    List<Map<String, Object?>> rows = const [];
+    String? usedNote;
+    for (final cand in _charLevelWhereCandidates(level, alias: 'c')) {
+      rows = await _db.rawQuery(r'''
       SELECT c.char AS ch, cp.bopomofo AS bopo
       FROM character c
       JOIN character_pronunciation cp ON cp.char_id = c.char_id
       WHERE ''' +
-        cFilter.where +
+        cand.where +
         r'''
         AND ''' +
         cpFilter.where +
@@ -199,9 +281,17 @@ class DbService {
         AND (SELECT COUNT(*) FROM character_pronunciation cp2 WHERE cp2.char_id = c.char_id) = 1
       ORDER BY RANDOM()
       LIMIT 1
-    ''', [...cFilter.args, ...cpFilter.args]);
+    ''', [...cand.args, ...cpFilter.args]);
+      if (rows.isNotEmpty) {
+        usedNote = cand.note;
+        break;
+      }
+    }
     if (rows.isEmpty) {
       throw StateError('找不到可用的單音字題目。');
+    }
+    if (usedNote != null && usedNote != 'base') {
+      AppLogger.log('[DB] B fallback level=$level note=$usedNote');
     }
 
     final ch = rows.first['ch'] as String;
@@ -263,14 +353,16 @@ class DbService {
     int optionCount = 4,
     EducationLevel level = EducationLevel.juniorHigh,
   }) async {
-    final cFilter = _charLevelWhere(level, alias: 'c');
     final cpFilter = _cpLevelWhere(level, alias: 'cp');
-    final rows = await _db.rawQuery(r'''
+    List<Map<String, Object?>> rows = const [];
+    String? usedNote;
+    for (final cand in _charLevelWhereCandidates(level, alias: 'c')) {
+      rows = await _db.rawQuery(r'''
       SELECT cp.bopomofo AS bopo, c.char AS ch
       FROM character_pronunciation cp
       JOIN character c ON c.char_id = cp.char_id
       WHERE ''' +
-        cpFilter.where +
+        cand.where +
         r'''
         AND ''' +
         cFilter.where +
@@ -278,9 +370,17 @@ class DbService {
         AND cp.bopomofo != ''
       ORDER BY RANDOM()
       LIMIT 1
-    ''', [...cpFilter.args, ...cFilter.args]);
+    ''', [...cand.args, ...cpFilter.args]);
+      if (rows.isNotEmpty) {
+        usedNote = cand.note;
+        break;
+      }
+    }
     if (rows.isEmpty) {
       throw StateError('找不到可用的「注音→選字」題目。');
+    }
+    if (usedNote != null && usedNote != 'base') {
+      AppLogger.log('[DB] D fallback level=$level note=$usedNote');
     }
 
     final bopomofo = rows.first['bopo'] as String;
@@ -342,19 +442,29 @@ class DbService {
     int optionCount = 4,
     EducationLevel level = EducationLevel.juniorHigh,
   }) async {
-    final wFilter = _wordLevelWhere(level, alias: 'w');
-    final rows = await _db.rawQuery(r'''
+    List<Map<String, Object?>> rows = const [];
+    String? usedNote;
+    for (final cand in _wordLevelWhereCandidates(level, alias: 'w')) {
+      rows = await _db.rawQuery(r'''
       SELECT w.word_id, w.word, w.bopomofo
       FROM word w
       WHERE ''' +
-        wFilter.where +
+        cand.where +
         r'''
         AND w.bopomofo != ''
       ORDER BY RANDOM()
       LIMIT 1
-    ''', wFilter.args);
+    ''', cand.args);
+      if (rows.isNotEmpty) {
+        usedNote = cand.note;
+        break;
+      }
+    }
     if (rows.isEmpty) {
-      throw StateError('找不到可用的「詞語→選注音」題目。');
+      throw StateError('找不到可用的「詞語→選注音」題目（該等級篩選過嚴）。');
+    }
+    if (usedNote != null && usedNote != 'base') {
+      AppLogger.log('[DB] E fallback level=$level note=$usedNote');
     }
 
     final wordId = rows.first['word_id'] as int;
@@ -432,23 +542,53 @@ class DbService {
     int pairCount = 4,
     EducationLevel level = EducationLevel.juniorHigh,
   }) async {
-    final wFilter = _wordLevelWhere(level, alias: 'word');
-    final rows = await _db.rawQuery(r'''
+    // 配對題最容易因為條件不足而缺題：這裡做兩層 fallback
+    // 1) pairCount: 4 -> 3 -> 2
+    // 2) allow_pairing: 1 -> 不限制
+    List<Map<String, Object?>> rows = const [];
+    String? usedNote;
+    bool usedAllow = true;
+    int usedPairCount = pairCount;
+
+    final pairCounts = <int>[
+      pairCount,
+      if (pairCount > 3) 3,
+      if (pairCount > 2) 2,
+    ];
+    for (final pc in pairCounts) {
+      for (final withAllow in [true, false]) {
+        for (final cand in _wordLevelWhereCandidates(level, alias: 'word')) {
+          final where = cand.where + (withAllow ? ' AND allow_pairing = 1' : '');
+          rows = await _db.rawQuery(r'''
       SELECT word, bopomofo
       FROM word
       WHERE ''' +
-        wFilter.where +
-        r'''
+              where +
+              r'''
         AND bopomofo != ''
-        AND allow_pairing = 1
       ORDER BY RANDOM()
       LIMIT ?
-    ''', [...wFilter.args, pairCount]);
-    if (rows.length < pairCount) {
-      throw StateError('可用配對題不足。');
+    ''', [...cand.args, pc]);
+          if (rows.length >= pc) {
+            usedNote = cand.note;
+            usedAllow = withAllow;
+            usedPairCount = pc;
+            break;
+          }
+        }
+        if (rows.length >= pc) break;
+      }
+      if (rows.length >= pc) break;
+    }
+
+    if (rows.length < usedPairCount) {
+      throw StateError('可用配對題不足（已放寬條件仍不足）。');
+    }
+    if (usedNote != null && usedNote != 'base') {
+      AppLogger.log('[DB] C fallback level=$level note=$usedNote allow=$usedAllow pairCount=$usedPairCount');
     }
     final answerMap = <String, String>{};
-    for (final r in rows) {
+    for (final r in rows.take(usedPairCount)) {
       answerMap[r['word'] as String] = (r['bopomofo'] as String?) ?? '';
     }
     final words = answerMap.keys.toList()..shuffle(Random());

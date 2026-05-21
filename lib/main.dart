@@ -982,27 +982,35 @@ class _GamePageState extends State<GamePage> {
   }
 
   ButtonStyle _styleForOption({required String opt, required String answer}) {
-    final correctColor = Colors.green;
-    final wrongColor = Colors.red;
+    // 依主題稍微調整色系，但仍保留「答對=偏綠、答錯=偏紅」的直覺。
+    final (correctColor, wrongColor) = switch (widget.themeStyle) {
+      ThemeStyle.sakura => (const Color(0xFF2E7D32), const Color(0xFFC62828)),
+      ThemeStyle.ocean => (const Color(0xFF00695C), const Color(0xFFB71C1C)),
+      ThemeStyle.forest => (const Color(0xFF1B5E20), const Color(0xFFC62828)),
+      ThemeStyle.night => (const Color(0xFF1565C0), const Color(0xFFD32F2F)),
+    };
 
     if (_locked) {
       if (opt == answer) {
         return FilledButton.styleFrom(
-          backgroundColor: correctColor.withOpacity(0.18),
-          foregroundColor: correctColor.shade800,
+          backgroundColor: correctColor.withOpacity(0.38), // 更顯眼
+          foregroundColor: Colors.white,
+          side: BorderSide(color: correctColor.withOpacity(0.85), width: 1.2),
         );
       }
       if (_wrongOptions.contains(opt)) {
         return FilledButton.styleFrom(
-          backgroundColor: wrongColor.withOpacity(0.15),
-          foregroundColor: wrongColor.shade800,
+          backgroundColor: wrongColor.withOpacity(0.30),
+          foregroundColor: Colors.white,
+          side: BorderSide(color: wrongColor.withOpacity(0.75), width: 1.0),
         );
       }
     } else {
       if (_wrongOptions.contains(opt)) {
         return FilledButton.styleFrom(
-          backgroundColor: wrongColor.withOpacity(0.15),
-          foregroundColor: wrongColor.shade800,
+          backgroundColor: wrongColor.withOpacity(0.30),
+          foregroundColor: Colors.white,
+          side: BorderSide(color: wrongColor.withOpacity(0.75), width: 1.0),
         );
       }
     }
