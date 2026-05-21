@@ -471,70 +471,87 @@ class DbService {
     final wFilter = _wordLevelWhere(level, alias: 'w');
     final w2Filter = _wordLevelWhere(level, alias: 'w2');
 
-    if (baseWord.isEmpty) {
-      // 挑一個「最後一字能接到其他詞語」的詞語，避免出題後無解
-      final rows = await _db.rawQuery(r'''
-        SELECT w.word AS w
-        FROM word w
+    // ⚠️ #18 開始卡住的主因：原本用 EXISTS + ORDER BY RANDOM 的「保證有後繼」挑字，
+    // 在部分手機/資料量下會非常慢（看起來像 DB 卡住）。
+    // 這裡改成「先隨機抽 baseWord，再檢查是否能接」，最多嘗試多次，避免一次就跑重查詢。
+
+    Future<String> _lastCharOf(String w) async {
+      final lastCharRows = await _db.rawQuery(
+        'SELECT substr(?, length(?), 1) AS last_char',
+        [w, w],
+      );
+      return (lastCharRows.first['last_char'] as String?) ?? '';
+    }
+
+    Future<String?> _randomNextWord(String base, String lastChar) async {
+      final answerRows = await _db.rawQuery(r'''
+        SELECT w2.word AS w
+        FROM word w2
         WHERE ''' +
-          wFilter.where +
+          w2Filter.where +
           r'''
-          AND w.is_common = 1
-          AND length(w.word) BETWEEN 2 AND 6
-          AND EXISTS (
-            SELECT 1
-            FROM word w2
-            WHERE ''' +
-              w2Filter.where +
-              r'''
-              AND w2.is_common = 1
-              AND w2.word != w.word
-              AND substr(w2.word, 1, 1) = substr(w.word, length(w.word), 1)
-          )
+          AND w2.is_common = 1
+          AND w2.word != ?
+          AND length(w2.word) BETWEEN 2 AND 6
+          AND substr(w2.word, 1, 1) = ?
         ORDER BY RANDOM()
         LIMIT 1
-      ''', [...wFilter.args, ...w2Filter.args]);
-      if (rows.isEmpty) {
+      ''', [...w2Filter.args, base, lastChar]);
+      if (answerRows.isEmpty) return null;
+      return answerRows.first['w'] as String;
+    }
+
+    String lastChar = '';
+    String answerWord = '';
+
+    if (baseWord.isEmpty) {
+      const maxPickTries = 40;
+      for (var i = 0; i < maxPickTries; i++) {
+        final rows = await _db.rawQuery(r'''
+          SELECT w.word AS w
+          FROM word w
+          WHERE ''' +
+            wFilter.where +
+            r'''
+            AND w.is_common = 1
+            AND length(w.word) BETWEEN 2 AND 6
+          ORDER BY RANDOM()
+          LIMIT 1
+        ''', wFilter.args);
+        if (rows.isEmpty) break;
+        final cand = rows.first['w'] as String;
+        final lc = await _lastCharOf(cand);
+        if (lc.isEmpty) continue;
+        final ans = await _randomNextWord(cand, lc);
+        if (ans == null) continue;
+        baseWord = cand;
+        lastChar = lc;
+        answerWord = ans;
+        break;
+      }
+      if (answerWord.isEmpty) {
         throw StateError('找不到可用的接龍詞語（請確認資料庫 word 表存在且有 common 標記）。');
       }
-      baseWord = rows.first['w'] as String;
-    }
-
-    final lastCharRows = await _db.rawQuery(r'''
-      SELECT substr(?, length(?), 1) AS last_char
-    ''', [baseWord, baseWord]);
-    final lastChar = (lastCharRows.first['last_char'] as String?) ?? '';
-    if (lastChar.isEmpty) {
-      throw StateError('接龍出題失敗：無法取得詞語最後一字。');
-    }
-
-    // 正解：必須以 lastChar 開頭
-    final answerRows = await _db.rawQuery(r'''
-      SELECT w2.word AS w
-      FROM word w2
-      WHERE ''' +
-        w2Filter.where +
-        r'''
-        AND w2.is_common = 1
-        AND w2.word != ?
-        AND length(w2.word) BETWEEN 2 AND 6
-        AND substr(w2.word, 1, 1) = ?
-      ORDER BY RANDOM()
-      LIMIT 1
-    ''', [...w2Filter.args, baseWord, lastChar]);
-    if (answerRows.isEmpty) {
-      // fallback：若 baseWord 是使用者指定、剛好接不到，就改抽一個能接的
-      if (currentWord != null) {
-        return randomWordChainQuestion(currentWord: null, optionCount: optionCount, level: level);
+    } else {
+      lastChar = await _lastCharOf(baseWord);
+      if (lastChar.isEmpty) {
+        throw StateError('接龍出題失敗：無法取得詞語最後一字。');
       }
-      throw StateError('找不到可接「$lastChar」開頭的詞語。');
+      final ans = await _randomNextWord(baseWord, lastChar);
+      if (ans == null) {
+        // fallback：若 baseWord 是使用者指定、剛好接不到，就改抽一個能接的
+        if (currentWord != null) {
+          return randomWordChainQuestion(currentWord: null, optionCount: optionCount, level: level);
+        }
+        throw StateError('找不到可接「$lastChar」開頭的詞語。');
+      }
+      answerWord = ans;
     }
-    final answerWord = answerRows.first['w'] as String;
 
     // 干擾：不以 lastChar 開頭
     final distractors = <String>[];
-    final tries = 36;
-    for (var t = 0; t < tries && distractors.length < optionCount - 1; t++) {
+    final need = max(0, optionCount - 1);
+    if (need > 0) {
       final r = await _db.rawQuery(r'''
         SELECT w.word AS w
         FROM word w
@@ -544,14 +561,17 @@ class DbService {
           AND w.is_common = 1
           AND length(w.word) BETWEEN 2 AND 6
           AND w.word != ?
+          AND w.word != ?
           AND substr(w.word, 1, 1) != ?
         ORDER BY RANDOM()
-        LIMIT 1
-      ''', [...wFilter.args, answerWord, lastChar]);
-      if (r.isEmpty) continue;
-      final w = r.first['w'] as String;
-      if (distractors.contains(w)) continue;
-      distractors.add(w);
+        LIMIT ?
+      ''', [...wFilter.args, baseWord, answerWord, lastChar, need]);
+      for (final row in r) {
+        final w = row['w'] as String;
+        if (w == answerWord) continue;
+        if (distractors.contains(w)) continue;
+        distractors.add(w);
+      }
     }
 
     while (distractors.length < optionCount - 1) {

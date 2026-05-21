@@ -288,10 +288,12 @@ class HomePage extends StatefulWidget {
 
 class _HomePageState extends State<HomePage> {
   GameSettings _settings = GameSettings(
-    mode: GameMode.fWordChain,
+    // 預設用較輕量的題型，避免第一次進入就跑接龍的大查詢造成「看起來卡住」。
+    // 接龍題型仍可在設定頁手動切換。
+    mode: GameMode.aAudioToChar,
     flavor: DataFlavor.enhanced,
-    playMode: PlayMode.timeAttack,
-    goal: defaultGoalFor(PlayMode.timeAttack),
+    playMode: PlayMode.scoreTarget,
+    goal: defaultGoalFor(PlayMode.scoreTarget),
     level: EducationLevel.juniorHigh,
     themeStyle: ThemeStyle.sakura,
   );
