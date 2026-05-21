@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_tts/flutter_tts.dart';
 
 import 'db/db_service.dart';
+import 'game_config.dart';
 import 'models.dart';
 
 void main() {
@@ -61,6 +62,78 @@ enum GameMode {
 /// - PlayMode：整體規則（計分/目標/限時/生命…）
 enum PlayMode { practice, scoreTarget, correctTarget, timeAttack, survival }
 
+String levelLabel(EducationLevel l) {
+  switch (l) {
+    case EducationLevel.elementary:
+      return '國小';
+    case EducationLevel.juniorHigh:
+      return '國中';
+    case EducationLevel.seniorHigh:
+      return '高中';
+    case EducationLevel.university:
+      return '大學';
+    case EducationLevel.graduate:
+      return '研究所';
+    case EducationLevel.working:
+      return '社會人士';
+    case EducationLevel.expert:
+      return '專家';
+    case EducationLevel.scholar:
+      return '學者';
+    case EducationLevel.master:
+      return '大師';
+  }
+}
+
+IconData levelIcon(EducationLevel l) {
+  switch (l) {
+    case EducationLevel.elementary:
+      return Icons.school;
+    case EducationLevel.juniorHigh:
+      return Icons.book;
+    case EducationLevel.seniorHigh:
+      return Icons.menu_book;
+    case EducationLevel.university:
+      return Icons.account_balance;
+    case EducationLevel.graduate:
+      return Icons.science;
+    case EducationLevel.working:
+      return Icons.work;
+    case EducationLevel.expert:
+      return Icons.psychology;
+    case EducationLevel.scholar:
+      return Icons.auto_stories;
+    case EducationLevel.master:
+      return Icons.emoji_events;
+  }
+}
+
+String themeLabel(ThemeStyle t) {
+  switch (t) {
+    case ThemeStyle.sakura:
+      return '櫻花';
+    case ThemeStyle.ocean:
+      return '海洋';
+    case ThemeStyle.forest:
+      return '森林';
+    case ThemeStyle.night:
+      return '夜色';
+  }
+}
+
+({List<Color> colors, List<IconData> decoIcons}) themeSpec(ThemeStyle t) {
+  switch (t) {
+    case ThemeStyle.sakura:
+      return (colors: const [Color(0xFFFFF1F7), Color(0xFFFFFFFF)], decoIcons: const [Icons.local_florist, Icons.favorite]);
+    case ThemeStyle.ocean:
+      return (colors: const [Color(0xFFE7F6FF), Color(0xFFFFFFFF)], decoIcons: const [Icons.water_drop, Icons.waves]);
+    case ThemeStyle.forest:
+      return (colors: const [Color(0xFFEAF7EE), Color(0xFFFFFFFF)], decoIcons: const [Icons.park, Icons.eco]);
+    case ThemeStyle.night:
+      return (colors: const [Color(0xFFEFEAFF), Color(0xFFFFFFFF)], decoIcons: const [Icons.nightlight_round, Icons.star]);
+  }
+}
+
 class GameGoal {
   final int? targetScore;
   final int? targetCorrect;
@@ -113,20 +186,33 @@ class GameSettings {
   final DataFlavor flavor;
   final PlayMode playMode;
   final GameGoal goal;
+  final EducationLevel level;
+  final ThemeStyle themeStyle;
 
   const GameSettings({
     required this.mode,
     required this.flavor,
     required this.playMode,
     required this.goal,
+    required this.level,
+    required this.themeStyle,
   });
 
-  GameSettings copyWith({GameMode? mode, DataFlavor? flavor, PlayMode? playMode, GameGoal? goal}) {
+  GameSettings copyWith({
+    GameMode? mode,
+    DataFlavor? flavor,
+    PlayMode? playMode,
+    GameGoal? goal,
+    EducationLevel? level,
+    ThemeStyle? themeStyle,
+  }) {
     return GameSettings(
       mode: mode ?? this.mode,
       flavor: flavor ?? this.flavor,
       playMode: playMode ?? this.playMode,
       goal: goal ?? this.goal,
+      level: level ?? this.level,
+      themeStyle: themeStyle ?? this.themeStyle,
     );
   }
 }
@@ -193,6 +279,8 @@ class _HomePageState extends State<HomePage> {
     flavor: DataFlavor.enhanced,
     playMode: PlayMode.timeAttack,
     goal: defaultGoalFor(PlayMode.timeAttack),
+    level: EducationLevel.juniorHigh,
+    themeStyle: ThemeStyle.sakura,
   );
 
   Future<void> _openSettings() async {
@@ -218,14 +306,9 @@ class _HomePageState extends State<HomePage> {
         ],
       ),
       body: Container(
-        decoration: const BoxDecoration(
-          gradient: LinearGradient(
-            begin: Alignment.topCenter,
-            end: Alignment.bottomCenter,
-            colors: [Color(0xFFFFF1F7), Color(0xFFFFFFFF)],
-          ),
-        ),
-        child: Padding(
+        child: ThemedBackground(
+          themeStyle: _settings.themeStyle,
+          child: Padding(
           padding: const EdgeInsets.all(16),
           child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -248,6 +331,17 @@ class _HomePageState extends State<HomePage> {
                     Text('資料庫：${_settings.flavor == DataFlavor.enhanced ? "強化版" : "原始轉檔"}'),
                     Text('題型：${modeLabel(_settings.mode)}'),
                     Text('玩法：${playModeLabel(_settings.playMode)}'),
+                    Row(
+                      children: [
+                        Icon(levelIcon(_settings.level), size: 18),
+                        const SizedBox(width: 6),
+                        Text('等級：${levelLabel(_settings.level)}'),
+                        const SizedBox(width: 12),
+                        const Icon(Icons.palette_outlined, size: 18),
+                        const SizedBox(width: 6),
+                        Text('主題：${themeLabel(_settings.themeStyle)}'),
+                      ],
+                    ),
                     Text(goalSummary(_settings.playMode, _settings.goal)),
                     const SizedBox(height: 8),
                     Text(
@@ -267,6 +361,8 @@ class _HomePageState extends State<HomePage> {
                     flavor: _settings.flavor,
                     playMode: _settings.playMode,
                     goal: _settings.goal,
+                    level: _settings.level,
+                    themeStyle: _settings.themeStyle,
                   ),
                 ));
               },
@@ -274,6 +370,7 @@ class _HomePageState extends State<HomePage> {
             ),
           ],
           ),
+        ),
         ),
       ),
     );
@@ -293,6 +390,8 @@ class _SettingsPageState extends State<SettingsPage> {
   late DataFlavor _flavor = widget.initial.flavor;
   late PlayMode _playMode = widget.initial.playMode;
   late GameGoal _goal = widget.initial.goal;
+  late EducationLevel _level = widget.initial.level;
+  late ThemeStyle _themeStyle = widget.initial.themeStyle;
 
   Future<int?> _askInt({
     required String title,
@@ -372,7 +471,14 @@ class _SettingsPageState extends State<SettingsPage> {
   }
 
   void _save() {
-    Navigator.of(context).pop(GameSettings(mode: _mode, flavor: _flavor, playMode: _playMode, goal: _goal));
+    Navigator.of(context).pop(GameSettings(
+      mode: _mode,
+      flavor: _flavor,
+      playMode: _playMode,
+      goal: _goal,
+      level: _level,
+      themeStyle: _themeStyle,
+    ));
   }
 
   @override
@@ -385,16 +491,42 @@ class _SettingsPageState extends State<SettingsPage> {
         ],
       ),
       body: Container(
-        decoration: const BoxDecoration(
-          gradient: LinearGradient(
-            begin: Alignment.topCenter,
-            end: Alignment.bottomCenter,
-            colors: [Color(0xFFFFF1F7), Color(0xFFFFFFFF)],
-          ),
-        ),
-        child: ListView(
+        child: ThemedBackground(
+          themeStyle: _themeStyle,
+          child: ListView(
           padding: const EdgeInsets.all(16),
           children: [
+          const Text('等級', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w600)),
+          const SizedBox(height: 8),
+          DropdownButtonFormField<EducationLevel>(
+            value: _level,
+            items: EducationLevel.values.map((l) {
+              return DropdownMenuItem(
+                value: l,
+                child: Row(
+                  children: [
+                    Icon(levelIcon(l), size: 18),
+                    const SizedBox(width: 8),
+                    Text(levelLabel(l)),
+                  ],
+                ),
+              );
+            }).toList(),
+            onChanged: (v) => setState(() => _level = v!),
+            decoration: const InputDecoration(border: OutlineInputBorder()),
+          ),
+          const SizedBox(height: 16),
+          const Text('主題', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w600)),
+          const SizedBox(height: 8),
+          DropdownButtonFormField<ThemeStyle>(
+            value: _themeStyle,
+            items: ThemeStyle.values
+                .map((t) => DropdownMenuItem(value: t, child: Text(themeLabel(t))))
+                .toList(),
+            onChanged: (v) => setState(() => _themeStyle = v!),
+            decoration: const InputDecoration(border: OutlineInputBorder()),
+          ),
+          const SizedBox(height: 20),
           const Text('資料庫', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w600)),
           const SizedBox(height: 8),
           SegmentedButton<DataFlavor>(
@@ -485,6 +617,7 @@ class _SettingsPageState extends State<SettingsPage> {
           FilledButton(onPressed: _save, child: const Text('儲存並返回')),
           ],
         ),
+        ),
       ),
     );
   }
@@ -497,11 +630,15 @@ class GamePage extends StatefulWidget {
     required this.flavor,
     required this.playMode,
     required this.goal,
+    required this.level,
+    required this.themeStyle,
   });
   final GameMode mode;
   final DataFlavor flavor;
   final PlayMode playMode;
   final GameGoal goal;
+  final EducationLevel level;
+  final ThemeStyle themeStyle;
 
   @override
   State<GamePage> createState() => _GamePageState();
@@ -510,6 +647,8 @@ class GamePage extends StatefulWidget {
 class _GamePageState extends State<GamePage> {
   DbService? _db;
   final FlutterTts _tts = FlutterTts();
+  String? _initError;
+  bool _ttsReady = false;
 
   int _score = 0;
   int _questions = 0; // 作答題數：每題/每輪只算 1 次（答錯重試不會一直 +1）
@@ -554,33 +693,52 @@ class _GamePageState extends State<GamePage> {
   }
 
   Future<void> _init() async {
-    final db = await DbService.open(flavor: widget.flavor);
-    await _tts.setLanguage('zh-TW');
-    // 讓發音更清楚：放慢一點、音高略提高
-    await _tts.setSpeechRate(0.40);
-    await _tts.setPitch(1.05);
-    await _tts.setVolume(1.0);
-    // 盡量等朗讀完成（避免連續點擊時互相蓋掉）
-    await _tts.awaitSpeakCompletion(true);
-    setState(() => _db = db);
-
-    if (widget.playMode == PlayMode.survival) {
-      _lives = (widget.goal.lives ?? 3);
-    }
-    if (widget.playMode == PlayMode.timeAttack) {
-      _timeLeft = (widget.goal.timeLimitSec ?? 60);
-      _timer?.cancel();
-      _timer = Timer.periodic(const Duration(seconds: 1), (_) {
-        if (!mounted || _isFinished) return;
-        setState(() {
-          _timeLeft = (_timeLeft ?? 0) - 1;
-        });
-        if ((_timeLeft ?? 0) <= 0) {
-          _finish(reason: '時間到');
-        }
+    try {
+      final db = await DbService.open(flavor: widget.flavor);
+      if (!mounted) return;
+      setState(() {
+        _db = db;
+        _initError = null;
       });
+
+      // TTS 初始化如果失敗，不應該導致整個遊戲卡在 loading。
+      try {
+        await _tts.setLanguage('zh-TW');
+        // 讓發音更清楚：放慢一點、音高略提高
+        await _tts.setSpeechRate(0.40);
+        await _tts.setPitch(1.05);
+        await _tts.setVolume(1.0);
+        // 盡量等朗讀完成（避免連續點擊時互相蓋掉）
+        await _tts.awaitSpeakCompletion(true);
+        _ttsReady = true;
+      } catch (e) {
+        _ttsReady = false;
+        if (mounted) {
+          setState(() => _feedback = '語音初始化失敗（仍可遊玩非朗讀題型）：$e');
+        }
+      }
+
+      if (widget.playMode == PlayMode.survival) {
+        _lives = (widget.goal.lives ?? 3);
+      }
+      if (widget.playMode == PlayMode.timeAttack) {
+        _timeLeft = (widget.goal.timeLimitSec ?? 60);
+        _timer?.cancel();
+        _timer = Timer.periodic(const Duration(seconds: 1), (_) {
+          if (!mounted || _isFinished) return;
+          setState(() {
+            _timeLeft = (_timeLeft ?? 0) - 1;
+          });
+          if ((_timeLeft ?? 0) <= 0) {
+            _finish(reason: '時間到');
+          }
+        });
+      }
+      await _next();
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _initError = e.toString());
     }
-    await _next();
   }
 
   @override
@@ -635,27 +793,31 @@ class _GamePageState extends State<GamePage> {
     try {
       _activeMode = _pickActiveMode();
       if (_activeMode == GameMode.aAudioToChar) {
-        final q = await db.randomAudioToCharQuestion();
+        final q = await db.randomAudioToCharQuestion(level: widget.level);
         setState(() => _qA = q);
         // 朗讀詞語（注音本身 TTS 不一定能順利朗讀）
-        await _tts.speak(q.word);
+        if (_ttsReady) {
+          await _tts.speak(q.word);
+        }
       } else if (_activeMode == GameMode.bCharToBopo) {
-        final q = await db.randomCharToBopoQuestion();
+        final q = await db.randomCharToBopoQuestion(level: widget.level);
         setState(() => _qB = q);
       } else if (_activeMode == GameMode.cPairing) {
-        final q = await db.randomPairingRound();
+        final q = await db.randomPairingRound(level: widget.level);
         setState(() => _qC = q);
       } else if (_activeMode == GameMode.dBopoToChar) {
-        final q = await db.randomBopoToCharQuestion();
+        final q = await db.randomBopoToCharQuestion(level: widget.level);
         setState(() => _qD = q);
       } else if (_activeMode == GameMode.eWordToBopo) {
-        final q = await db.randomWordToBopoQuestion();
+        final q = await db.randomWordToBopoQuestion(level: widget.level);
         setState(() => _qE = q);
       } else if (_activeMode == GameMode.fWordChain) {
-        final q = await db.randomWordChainQuestion(currentWord: _chainCurrentWord);
+        final q = await db.randomWordChainQuestion(currentWord: _chainCurrentWord, level: widget.level);
         setState(() => _qF = q);
         // 為了清楚一點：自動唸出目前詞語（接龍提示）
-        await _tts.speak(q.currentWord);
+        if (_ttsReady) {
+          await _tts.speak(q.currentWord);
+        }
       }
     } catch (e) {
       setState(() => _feedback = '出題失敗：$e');
@@ -777,6 +939,8 @@ class _GamePageState extends State<GamePage> {
                     flavor: widget.flavor,
                     playMode: widget.playMode,
                     goal: widget.goal,
+                    level: widget.level,
+                    themeStyle: widget.themeStyle,
                   ),
                 ));
               },
@@ -877,6 +1041,18 @@ class _GamePageState extends State<GamePage> {
         appBar: AppBar(
           title: Text('作答（${modeLabel(_activeMode)}）'),
           actions: [
+            Padding(
+              padding: const EdgeInsets.only(right: 10),
+              child: Center(
+                child: Row(
+                  children: [
+                    Icon(levelIcon(widget.level), size: 18),
+                    const SizedBox(width: 4),
+                    Text(levelLabel(widget.level)),
+                  ],
+                ),
+              ),
+            ),
             if (widget.playMode == PlayMode.timeAttack && _timeLeft != null)
               Padding(
                 padding: const EdgeInsets.only(right: 10),
@@ -894,17 +1070,34 @@ class _GamePageState extends State<GamePage> {
           ],
         ),
         body: Container(
-          decoration: const BoxDecoration(
-            gradient: LinearGradient(
-              begin: Alignment.topCenter,
-              end: Alignment.bottomCenter,
-              colors: [Color(0xFFFFF1F7), Color(0xFFFFFFFF)],
-            ),
-          ),
-          child: Padding(
+          child: ThemedBackground(
+            themeStyle: widget.themeStyle,
+            child: Padding(
             padding: const EdgeInsets.all(16),
             child: !dbReady
-                ? const Center(child: CircularProgressIndicator())
+                ? (_initError == null
+                    ? const Center(child: CircularProgressIndicator())
+                    : Center(
+                        child: Card(
+                          child: Padding(
+                            padding: const EdgeInsets.all(16),
+                            child: Column(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                const Text('初始化失敗', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800)),
+                                const SizedBox(height: 8),
+                                Text(_initError!, style: const TextStyle(color: Colors.black54)),
+                                const SizedBox(height: 12),
+                                FilledButton.icon(
+                                  onPressed: _init,
+                                  icon: const Icon(Icons.refresh),
+                                  label: const Text('重試'),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                      ))
                 : Column(
                     crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: [
@@ -932,6 +1125,7 @@ class _GamePageState extends State<GamePage> {
                   ),
           ),
         ),
+          ),
       ),
     );
   }
@@ -961,22 +1155,27 @@ class _GamePageState extends State<GamePage> {
               const SizedBox(height: 6),
               Text('提示注音：${q.answerBopomofo}', style: const TextStyle(color: Colors.black54)),
               const SizedBox(height: 12),
-              Wrap(
-                spacing: 10,
-                runSpacing: 10,
-                children: q.options.map((opt) {
-                  return SizedBox(
-                    width: 72,
-                    height: 56,
-                    child: FilledButton.tonal(
-                      style: _styleForOption(opt: opt, answer: q.answerChar),
-                      onPressed: (_locked || _isFinished || _wrongOptions.contains(opt))
-                          ? null
-                          : () => _tapOption(opt: opt, answer: q.answerChar),
-                      child: _optionChild(opt: opt, answer: q.answerChar, fontSize: 22),
-                    ),
+              LayoutBuilder(
+                builder: (ctx, constraints) {
+                  final cols = ((constraints.maxWidth) / 120).floor().clamp(2, 4);
+                  return GridView.count(
+                    crossAxisCount: cols,
+                    shrinkWrap: true,
+                    physics: const NeverScrollableScrollPhysics(),
+                    crossAxisSpacing: 10,
+                    mainAxisSpacing: 10,
+                    childAspectRatio: 1.7,
+                    children: q.options.map((opt) {
+                      return FilledButton.tonal(
+                        style: _styleForOption(opt: opt, answer: q.answerChar),
+                        onPressed: (_locked || _isFinished || _wrongOptions.contains(opt))
+                            ? null
+                            : () => _tapOption(opt: opt, answer: q.answerChar),
+                        child: _optionChild(opt: opt, answer: q.answerChar, fontSize: 22),
+                      );
+                    }).toList(),
                   );
-                }).toList(),
+                },
               ),
               const SizedBox(height: 10),
               OutlinedButton.icon(
@@ -1097,22 +1296,27 @@ class _GamePageState extends State<GamePage> {
               const SizedBox(height: 10),
               Center(child: Text(q.bopomofo, style: const TextStyle(fontSize: 44, fontWeight: FontWeight.w800))),
               const SizedBox(height: 12),
-              Wrap(
-                spacing: 10,
-                runSpacing: 10,
-                children: q.options.map((opt) {
-                  return SizedBox(
-                    width: 72,
-                    height: 56,
-                    child: FilledButton.tonal(
-                      style: _styleForOption(opt: opt, answer: q.answerChar),
-                      onPressed: (_locked || _isFinished || _wrongOptions.contains(opt))
-                          ? null
-                          : () => _tapOption(opt: opt, answer: q.answerChar),
-                      child: _optionChild(opt: opt, answer: q.answerChar, fontSize: 22),
-                    ),
+              LayoutBuilder(
+                builder: (ctx, constraints) {
+                  final cols = ((constraints.maxWidth) / 120).floor().clamp(2, 4);
+                  return GridView.count(
+                    crossAxisCount: cols,
+                    shrinkWrap: true,
+                    physics: const NeverScrollableScrollPhysics(),
+                    crossAxisSpacing: 10,
+                    mainAxisSpacing: 10,
+                    childAspectRatio: 1.7,
+                    children: q.options.map((opt) {
+                      return FilledButton.tonal(
+                        style: _styleForOption(opt: opt, answer: q.answerChar),
+                        onPressed: (_locked || _isFinished || _wrongOptions.contains(opt))
+                            ? null
+                            : () => _tapOption(opt: opt, answer: q.answerChar),
+                        child: _optionChild(opt: opt, answer: q.answerChar, fontSize: 22),
+                      );
+                    }).toList(),
                   );
-                }).toList(),
+                },
               ),
             ],
           ),
@@ -1189,5 +1393,52 @@ class _GamePageState extends State<GamePage> {
         // 不會走到這裡（mix 會在 _pickActiveMode 轉成實際題型）
         return const SizedBox.shrink();
     }
+  }
+}
+
+/// 用「漸層 + 淡淡的圖案」做背景，不影響題目/答案閱讀。
+class ThemedBackground extends StatelessWidget {
+  const ThemedBackground({super.key, required this.themeStyle, required this.child});
+  final ThemeStyle themeStyle;
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    final spec = themeSpec(themeStyle);
+    final icons = spec.decoIcons;
+
+    return Stack(
+      children: [
+        Positioned.fill(
+          child: Container(
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                begin: Alignment.topCenter,
+                end: Alignment.bottomCenter,
+                colors: spec.colors,
+              ),
+            ),
+          ),
+        ),
+        // 裝飾圖案：低透明度、避免遮擋內容（放在邊角）
+        Positioned(
+          top: 30,
+          right: 18,
+          child: Opacity(
+            opacity: 0.10,
+            child: Icon(icons[0], size: 88),
+          ),
+        ),
+        Positioned(
+          bottom: 24,
+          left: 18,
+          child: Opacity(
+            opacity: 0.08,
+            child: Icon(icons[1], size: 110),
+          ),
+        ),
+        Positioned.fill(child: child),
+      ],
+    );
   }
 }

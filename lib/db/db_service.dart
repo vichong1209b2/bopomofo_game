@@ -6,6 +6,7 @@ import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 import 'package:sqflite/sqflite.dart';
 
+import '../game_config.dart';
 import '../models.dart';
 
 enum DataFlavor { enhanced, raw }
@@ -30,13 +31,77 @@ class DbService {
 
   Future<void> close() => _db.close();
 
+  // ====== 等級過濾（教育分級） ======
+
+  static ({String where, List<Object?> args}) _wordLevelWhere(EducationLevel level, {String alias = 'w'}) {
+    final r = ruleForLevel(level);
+    final parts = <String>[];
+    final args = <Object?>[];
+
+    parts.add('$alias.difficulty <= ?');
+    args.add(r.maxWordDifficulty);
+
+    // 國小：只用國小字詞
+    if (r.requirePrimaryWords) {
+      parts.add('$alias.is_primary_school = 1');
+    }
+
+    // 國中：至少是「常用」或「國小」
+    if (level == EducationLevel.juniorHigh) {
+      parts.add('($alias.is_common = 1 OR $alias.is_primary_school = 1)');
+    }
+
+    // 高中/大學：以常用為主
+    if (r.requireCommonWords) {
+      parts.add('$alias.is_common = 1');
+    }
+
+    if (!r.includeLowPriorityWords) {
+      parts.add("$alias.game_priority != 'low'");
+    }
+
+    return (where: parts.join(' AND '), args: args);
+  }
+
+  static ({String where, List<Object?> args}) _charLevelWhere(EducationLevel level, {String alias = 'c'}) {
+    final r = ruleForLevel(level);
+    final parts = <String>[];
+    final args = <Object?>[];
+
+    if (r.requirePrimaryChars) {
+      parts.add('$alias.is_primary_school = 1');
+    } else if (r.requireCommonChars) {
+      // 讓國小/常用都進來（高等級範圍涵蓋低等級）
+      parts.add('($alias.is_common = 1 OR $alias.is_primary_school = 1)');
+    }
+
+    if (!r.includeLowPriorityChars) {
+      parts.add("$alias.game_priority != 'low'");
+    }
+
+    return (where: parts.isEmpty ? '1=1' : parts.join(' AND '), args: args);
+  }
+
+  static ({String where, List<Object?> args}) _cpLevelWhere(EducationLevel level, {String alias = 'cp'}) {
+    // pronunciation 沒有 primary/common 欄位，只有 priority
+    final r = ruleForLevel(level);
+    if (r.includeLowPriorityChars) return (where: '1=1', args: const []);
+    return (where: "$alias.game_priority != 'low'", args: const []);
+  }
+
   // ====== 題型 A：聽音選字（TTS 朗讀詞語） ======
 
-  Future<AudioToCharQuestion> randomAudioToCharQuestion({int optionCount = 4}) async {
+  Future<AudioToCharQuestion> randomAudioToCharQuestion({
+    int optionCount = 4,
+    EducationLevel level = EducationLevel.juniorHigh,
+  }) async {
+    final wFilter = _wordLevelWhere(level, alias: 'w');
     final w = await _db.rawQuery(r'''
       SELECT w.word_id, w.word, w.bopomofo
       FROM word w
-      WHERE w.game_priority != 'low'
+      WHERE ''' +
+        wFilter.where +
+        r'''
         AND w.allow_audio_to_char = 1
         AND EXISTS (
           SELECT 1 FROM word_char wc
@@ -44,7 +109,7 @@ class DbService {
         )
       ORDER BY RANDOM()
       LIMIT 1
-    ''');
+    ''', wFilter.args);
     if (w.isEmpty) {
       throw StateError('找不到可用的詞語（請確認資料庫已包含 enhanced schema）。');
     }
@@ -115,17 +180,26 @@ class DbService {
 
   // ====== 題型 B：看字選音（先用單音字避免歧義） ======
 
-  Future<CharToBopoQuestion> randomCharToBopoQuestion({int optionCount = 4}) async {
+  Future<CharToBopoQuestion> randomCharToBopoQuestion({
+    int optionCount = 4,
+    EducationLevel level = EducationLevel.juniorHigh,
+  }) async {
+    final cFilter = _charLevelWhere(level, alias: 'c');
+    final cpFilter = _cpLevelWhere(level, alias: 'cp');
     final rows = await _db.rawQuery(r'''
       SELECT c.char AS ch, cp.bopomofo AS bopo
       FROM character c
       JOIN character_pronunciation cp ON cp.char_id = c.char_id
-      WHERE c.game_priority != 'low'
-        AND cp.game_priority != 'low'
+      WHERE ''' +
+        cFilter.where +
+        r'''
+        AND ''' +
+        cpFilter.where +
+        r'''
         AND (SELECT COUNT(*) FROM character_pronunciation cp2 WHERE cp2.char_id = c.char_id) = 1
       ORDER BY RANDOM()
       LIMIT 1
-    ''');
+    ''', [...cFilter.args, ...cpFilter.args]);
     if (rows.isEmpty) {
       throw StateError('找不到可用的單音字題目。');
     }
@@ -185,17 +259,26 @@ class DbService {
 
   // ====== 題型 D：看注音選字（Bopo → Char） ======
 
-  Future<BopoToCharQuestion> randomBopoToCharQuestion({int optionCount = 4}) async {
+  Future<BopoToCharQuestion> randomBopoToCharQuestion({
+    int optionCount = 4,
+    EducationLevel level = EducationLevel.juniorHigh,
+  }) async {
+    final cFilter = _charLevelWhere(level, alias: 'c');
+    final cpFilter = _cpLevelWhere(level, alias: 'cp');
     final rows = await _db.rawQuery(r'''
       SELECT cp.bopomofo AS bopo, c.char AS ch
       FROM character_pronunciation cp
       JOIN character c ON c.char_id = cp.char_id
-      WHERE cp.game_priority != 'low'
-        AND c.game_priority != 'low'
+      WHERE ''' +
+        cpFilter.where +
+        r'''
+        AND ''' +
+        cFilter.where +
+        r'''
         AND cp.bopomofo != ''
       ORDER BY RANDOM()
       LIMIT 1
-    ''');
+    ''', [...cpFilter.args, ...cFilter.args]);
     if (rows.isEmpty) {
       throw StateError('找不到可用的「注音→選字」題目。');
     }
@@ -255,15 +338,21 @@ class DbService {
 
   // ====== 題型 E：看詞語選注音（Word → Bopo） ======
 
-  Future<WordToBopoQuestion> randomWordToBopoQuestion({int optionCount = 4}) async {
+  Future<WordToBopoQuestion> randomWordToBopoQuestion({
+    int optionCount = 4,
+    EducationLevel level = EducationLevel.juniorHigh,
+  }) async {
+    final wFilter = _wordLevelWhere(level, alias: 'w');
     final rows = await _db.rawQuery(r'''
       SELECT w.word_id, w.word, w.bopomofo
       FROM word w
-      WHERE w.game_priority != 'low'
+      WHERE ''' +
+        wFilter.where +
+        r'''
         AND w.bopomofo != ''
       ORDER BY RANDOM()
       LIMIT 1
-    ''');
+    ''', wFilter.args);
     if (rows.isEmpty) {
       throw StateError('找不到可用的「詞語→選注音」題目。');
     }
@@ -339,16 +428,22 @@ class DbService {
 
   // ====== 題型 C：配對（詞語 ↔ 注音） ======
 
-  Future<PairingRound> randomPairingRound({int pairCount = 4}) async {
+  Future<PairingRound> randomPairingRound({
+    int pairCount = 4,
+    EducationLevel level = EducationLevel.juniorHigh,
+  }) async {
+    final wFilter = _wordLevelWhere(level, alias: 'word');
     final rows = await _db.rawQuery(r'''
       SELECT word, bopomofo
       FROM word
-      WHERE game_priority != 'low'
+      WHERE ''' +
+        wFilter.where +
+        r'''
         AND bopomofo != ''
         AND allow_pairing = 1
       ORDER BY RANDOM()
       LIMIT ?
-    ''', [pairCount]);
+    ''', [...wFilter.args, pairCount]);
     if (rows.length < pairCount) {
       throw StateError('可用配對題不足。');
     }
@@ -370,28 +465,35 @@ class DbService {
   Future<WordChainQuestion> randomWordChainQuestion({
     String? currentWord,
     int optionCount = 4,
+    EducationLevel level = EducationLevel.juniorHigh,
   }) async {
     String baseWord = currentWord ?? '';
+    final wFilter = _wordLevelWhere(level, alias: 'w');
+    final w2Filter = _wordLevelWhere(level, alias: 'w2');
 
     if (baseWord.isEmpty) {
       // 挑一個「最後一字能接到其他詞語」的詞語，避免出題後無解
       final rows = await _db.rawQuery(r'''
         SELECT w.word AS w
         FROM word w
-        WHERE w.game_priority != 'low'
+        WHERE ''' +
+          wFilter.where +
+          r'''
           AND w.is_common = 1
           AND length(w.word) BETWEEN 2 AND 6
           AND EXISTS (
             SELECT 1
             FROM word w2
-            WHERE w2.game_priority != 'low'
+            WHERE ''' +
+              w2Filter.where +
+              r'''
               AND w2.is_common = 1
               AND w2.word != w.word
               AND substr(w2.word, 1, 1) = substr(w.word, length(w.word), 1)
           )
         ORDER BY RANDOM()
         LIMIT 1
-      ''');
+      ''', [...wFilter.args, ...w2Filter.args]);
       if (rows.isEmpty) {
         throw StateError('找不到可用的接龍詞語（請確認資料庫 word 表存在且有 common 標記）。');
       }
@@ -410,18 +512,20 @@ class DbService {
     final answerRows = await _db.rawQuery(r'''
       SELECT w2.word AS w
       FROM word w2
-      WHERE w2.game_priority != 'low'
+      WHERE ''' +
+        w2Filter.where +
+        r'''
         AND w2.is_common = 1
         AND w2.word != ?
         AND length(w2.word) BETWEEN 2 AND 6
         AND substr(w2.word, 1, 1) = ?
       ORDER BY RANDOM()
       LIMIT 1
-    ''', [baseWord, lastChar]);
+    ''', [...w2Filter.args, baseWord, lastChar]);
     if (answerRows.isEmpty) {
       // fallback：若 baseWord 是使用者指定、剛好接不到，就改抽一個能接的
       if (currentWord != null) {
-        return randomWordChainQuestion(currentWord: null, optionCount: optionCount);
+        return randomWordChainQuestion(currentWord: null, optionCount: optionCount, level: level);
       }
       throw StateError('找不到可接「$lastChar」開頭的詞語。');
     }
@@ -434,14 +538,16 @@ class DbService {
       final r = await _db.rawQuery(r'''
         SELECT w.word AS w
         FROM word w
-        WHERE w.game_priority != 'low'
+        WHERE ''' +
+          wFilter.where +
+          r'''
           AND w.is_common = 1
           AND length(w.word) BETWEEN 2 AND 6
           AND w.word != ?
           AND substr(w.word, 1, 1) != ?
         ORDER BY RANDOM()
         LIMIT 1
-      ''', [answerWord, lastChar]);
+      ''', [...wFilter.args, answerWord, lastChar]);
       if (r.isEmpty) continue;
       final w = r.first['w'] as String;
       if (distractors.contains(w)) continue;
