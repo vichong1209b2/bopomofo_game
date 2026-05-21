@@ -765,19 +765,22 @@ class _GamePageState extends State<GamePage> {
     }
   }
 
-  bool get _canUseAudioHint => !_isFinished && _ttsReady && _audioHintsLeft > 0;
+  bool get _canUseAudioHintLimited => !_isFinished && _ttsReady && _audioHintsLeft > 0;
+  bool get _canUseAudioHintUnlimited => !_isFinished && _ttsReady;
 
-  Future<void> _useAudioHint(String text) async {
+  Future<void> _useAudioHint(String text, {required bool consume}) async {
     if (_isFinished) return;
     if (!_ttsReady) {
       if (mounted) setState(() => _feedback = '語音不可用（TTS 初始化失敗）');
       return;
     }
-    if (_audioHintsLeft <= 0) {
+    if (consume && _audioHintsLeft <= 0) {
       if (mounted) setState(() => _feedback = '發音提示次數已用完');
       return;
     }
-    setState(() => _audioHintsLeft -= 1);
+    if (consume) {
+      setState(() => _audioHintsLeft -= 1);
+    }
     await _tts.speak(text);
   }
 
@@ -999,36 +1002,46 @@ class _GamePageState extends State<GamePage> {
     });
   }
 
+  // 依主題稍微調整色系，但仍保留「答對=偏綠、答錯=偏紅」的直覺。
+  (Color correct, Color wrong) get _feedbackPalette => switch (widget.themeStyle) {
+        ThemeStyle.sakura => (const Color(0xFF2E7D32), const Color(0xFFC62828)),
+        ThemeStyle.ocean => (const Color(0xFF00695C), const Color(0xFFB71C1C)),
+        ThemeStyle.forest => (const Color(0xFF1B5E20), const Color(0xFFC62828)),
+        ThemeStyle.night => (const Color(0xFF2E7D32), const Color(0xFFD32F2F)),
+      };
+
   ButtonStyle _styleForOption({required String opt, required String answer}) {
-    // 依主題稍微調整色系，但仍保留「答對=偏綠、答錯=偏紅」的直覺。
-    final (correctColor, wrongColor) = switch (widget.themeStyle) {
-      ThemeStyle.sakura => (const Color(0xFF2E7D32), const Color(0xFFC62828)),
-      ThemeStyle.ocean => (const Color(0xFF00695C), const Color(0xFFB71C1C)),
-      ThemeStyle.forest => (const Color(0xFF1B5E20), const Color(0xFFC62828)),
-      ThemeStyle.night => (const Color(0xFF2E7D32), const Color(0xFFD32F2F)),
-    };
+    final (correctColor, wrongColor) = _feedbackPalette;
+    final correctBg = correctColor.withOpacity(0.88);
+    final wrongBg = wrongColor.withOpacity(0.82);
 
     if (_locked) {
       if (opt == answer) {
         return FilledButton.styleFrom(
-          backgroundColor: correctColor.withOpacity(0.24),
+          backgroundColor: correctBg,
           foregroundColor: Colors.white,
-          side: BorderSide(color: correctColor.withOpacity(0.85), width: 1.2),
+          disabledBackgroundColor: correctBg, // disabled(鎖定)時仍要顯眼
+          disabledForegroundColor: Colors.white,
+          side: BorderSide(color: correctColor.withOpacity(0.95), width: 1.2),
         );
       }
       if (_wrongOptions.contains(opt)) {
         return FilledButton.styleFrom(
-          backgroundColor: wrongColor.withOpacity(0.22),
+          backgroundColor: wrongBg,
           foregroundColor: Colors.white,
-          side: BorderSide(color: wrongColor.withOpacity(0.75), width: 1.0),
+          disabledBackgroundColor: wrongBg,
+          disabledForegroundColor: Colors.white,
+          side: BorderSide(color: wrongColor.withOpacity(0.92), width: 1.0),
         );
       }
     } else {
       if (_wrongOptions.contains(opt)) {
         return FilledButton.styleFrom(
-          backgroundColor: wrongColor.withOpacity(0.22),
+          backgroundColor: wrongBg,
           foregroundColor: Colors.white,
-          side: BorderSide(color: wrongColor.withOpacity(0.75), width: 1.0),
+          disabledBackgroundColor: wrongBg,
+          disabledForegroundColor: Colors.white,
+          side: BorderSide(color: wrongColor.withOpacity(0.92), width: 1.0),
         );
       }
     }
@@ -1037,10 +1050,17 @@ class _GamePageState extends State<GamePage> {
 
   Widget _optionChild({required String opt, required String answer, double fontSize = 20}) {
     final isCorrect = _locked && opt == answer;
+    final isWrong = _wrongOptions.contains(opt);
     return Text(
-      isCorrect ? '✓ $opt' : opt,
+      isCorrect
+          ? '✓ $opt'
+          : (isWrong ? '✗ $opt' : opt),
       textAlign: TextAlign.center,
-      style: TextStyle(fontSize: fontSize, fontWeight: isCorrect ? FontWeight.w800 : FontWeight.w600),
+      style: TextStyle(
+        fontSize: fontSize,
+        fontWeight: (isCorrect || isWrong) ? FontWeight.w900 : FontWeight.w700,
+        letterSpacing: 0.2,
+      ),
     );
   }
 
@@ -1227,9 +1247,10 @@ class _GamePageState extends State<GamePage> {
               ),
               const SizedBox(height: 10),
               OutlinedButton.icon(
-                onPressed: _canUseAudioHint ? () => _useAudioHint(q.word) : null,
+                // A 題型：聽音猜字，為避免聽不清楚，不限制重聽次數
+                onPressed: _canUseAudioHintUnlimited ? () => _useAudioHint(q.word, consume: false) : null,
                 icon: const Icon(Icons.volume_up),
-                label: Text('再聽一次（剩$_audioHintsLeft）'),
+                label: const Text('再聽一次（不限次）'),
               ),
             ],
           ),
@@ -1263,7 +1284,7 @@ class _GamePageState extends State<GamePage> {
               }),
               const SizedBox(height: 8),
               OutlinedButton.icon(
-                onPressed: _canUseAudioHint ? () => _useAudioHint(q.character) : null,
+                onPressed: _canUseAudioHintLimited ? () => _useAudioHint(q.character, consume: true) : null,
                 icon: const Icon(Icons.volume_up),
                 label: Text('唸一遍（剩$_audioHintsLeft）'),
               ),
@@ -1398,7 +1419,7 @@ class _GamePageState extends State<GamePage> {
               }),
               const SizedBox(height: 8),
               OutlinedButton.icon(
-                onPressed: _canUseAudioHint ? () => _useAudioHint(q.word) : null,
+                onPressed: _canUseAudioHintLimited ? () => _useAudioHint(q.word, consume: true) : null,
                 icon: const Icon(Icons.volume_up),
                 label: Text('唸一遍（剩$_audioHintsLeft）'),
               ),
@@ -1434,7 +1455,7 @@ class _GamePageState extends State<GamePage> {
               }),
               const SizedBox(height: 8),
               OutlinedButton.icon(
-                onPressed: _canUseAudioHint ? () => _useAudioHint(q.currentWord) : null,
+                onPressed: _canUseAudioHintLimited ? () => _useAudioHint(q.currentWord, consume: true) : null,
                 icon: const Icon(Icons.volume_up),
                 label: Text('再聽一次（剩$_audioHintsLeft）'),
               ),
