@@ -8,6 +8,7 @@ import 'debug/app_logger.dart';
 import 'debug/log_page.dart';
 import 'game_config.dart';
 import 'models.dart';
+import 'sfx/sfx_player.dart';
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
@@ -201,6 +202,7 @@ class GameSettings {
   final GameGoal goal;
   final EducationLevel level;
   final ThemeStyle themeStyle;
+  final bool soundEnabled; // 答對/答錯音效（不含 TTS）
 
   const GameSettings({
     required this.mode,
@@ -209,6 +211,7 @@ class GameSettings {
     required this.goal,
     required this.level,
     required this.themeStyle,
+    required this.soundEnabled,
   });
 
   GameSettings copyWith({
@@ -218,6 +221,7 @@ class GameSettings {
     GameGoal? goal,
     EducationLevel? level,
     ThemeStyle? themeStyle,
+    bool? soundEnabled,
   }) {
     return GameSettings(
       mode: mode ?? this.mode,
@@ -226,6 +230,7 @@ class GameSettings {
       goal: goal ?? this.goal,
       level: level ?? this.level,
       themeStyle: themeStyle ?? this.themeStyle,
+      soundEnabled: soundEnabled ?? this.soundEnabled,
     );
   }
 }
@@ -296,6 +301,7 @@ class _HomePageState extends State<HomePage> {
     goal: defaultGoalFor(PlayMode.scoreTarget),
     level: EducationLevel.juniorHigh,
     themeStyle: ThemeStyle.sakura,
+    soundEnabled: true,
   );
 
   Future<void> _openSettings() async {
@@ -385,6 +391,7 @@ class _HomePageState extends State<HomePage> {
                     goal: _settings.goal,
                     level: _settings.level,
                     themeStyle: _settings.themeStyle,
+                    soundEnabled: _settings.soundEnabled,
                   ),
                 ));
               },
@@ -414,6 +421,7 @@ class _SettingsPageState extends State<SettingsPage> {
   late GameGoal _goal = widget.initial.goal;
   late EducationLevel _level = widget.initial.level;
   late ThemeStyle _themeStyle = widget.initial.themeStyle;
+  late bool _soundEnabled = widget.initial.soundEnabled;
 
   Future<int?> _askInt({
     required String title,
@@ -500,6 +508,7 @@ class _SettingsPageState extends State<SettingsPage> {
       goal: _goal,
       level: _level,
       themeStyle: _themeStyle,
+      soundEnabled: _soundEnabled,
     ));
   }
 
@@ -547,6 +556,15 @@ class _SettingsPageState extends State<SettingsPage> {
                 .toList(),
             onChanged: (v) => setState(() => _themeStyle = v!),
             decoration: const InputDecoration(border: OutlineInputBorder()),
+          ),
+          const SizedBox(height: 20),
+          const Text('音效', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w600)),
+          const SizedBox(height: 8),
+          SwitchListTile(
+            value: _soundEnabled,
+            onChanged: (v) => setState(() => _soundEnabled = v),
+            title: const Text('答對 / 答錯音效'),
+            subtitle: const Text('答對：叮咚叮咚｜答錯：答答'),
           ),
           const SizedBox(height: 20),
           const Text('資料庫', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w600)),
@@ -654,6 +672,7 @@ class GamePage extends StatefulWidget {
     required this.goal,
     required this.level,
     required this.themeStyle,
+    required this.soundEnabled,
   });
   final GameMode mode;
   final DataFlavor flavor;
@@ -661,6 +680,7 @@ class GamePage extends StatefulWidget {
   final GameGoal goal;
   final EducationLevel level;
   final ThemeStyle themeStyle;
+  final bool soundEnabled;
 
   @override
   State<GamePage> createState() => _GamePageState();
@@ -920,6 +940,21 @@ class _GamePageState extends State<GamePage> {
         }
       }
     });
+
+    // 答題音效（不含 TTS，可在設定關閉）
+    if (widget.soundEnabled) {
+      Future.microtask(() async {
+        try {
+          if (correct) {
+            await SfxPlayer.playCorrect();
+          } else {
+            await SfxPlayer.playWrong();
+          }
+        } catch (_) {
+          // ignore: 音效失敗不應該影響遊戲
+        }
+      });
+    }
     _checkEnd();
   }
 
@@ -984,6 +1019,7 @@ class _GamePageState extends State<GamePage> {
                     goal: widget.goal,
                     level: widget.level,
                     themeStyle: widget.themeStyle,
+                    soundEnabled: widget.soundEnabled,
                   ),
                 ));
               },
