@@ -787,6 +787,7 @@ class _GamePageState extends State<GamePage> {
   final FlutterTts _tts = FlutterTts();
   String? _initError;
   bool _ttsReady = false;
+  String? _ttsLang; // 實際使用的 TTS 語言（不同手機支援狀況不同）
   late int _audioHintsLeft;
 
   int _score = 0;
@@ -843,14 +844,7 @@ class _GamePageState extends State<GamePage> {
 
       // TTS 初始化如果失敗，不應該導致整個遊戲卡在 loading。
       try {
-        await _tts.setLanguage('zh-TW');
-        // 讓發音更清楚：放慢一點、音高略提高
-        await _tts.setSpeechRate(0.40);
-        await _tts.setPitch(1.05);
-        await _tts.setVolume(1.0);
-        // 盡量等朗讀完成（避免連續點擊時互相蓋掉）
-        await _tts.awaitSpeakCompletion(true);
-        _ttsReady = true;
+        _ttsReady = await _setupTts();
       } catch (e) {
         _ttsReady = false;
         if (mounted) {
@@ -884,10 +878,71 @@ class _GamePageState extends State<GamePage> {
   bool get _canUseAudioHintLimited => !_isFinished && _ttsReady && _audioHintsLeft > 0;
   bool get _canUseAudioHintUnlimited => !_isFinished && _ttsReady;
 
+  Future<bool> _setupTts() async {
+    // 為什麼要做 fallback：
+    // 某些手機（例如部分 realme/OPPO 系）若沒有安裝/下載「中文語音資料」，setLanguage('zh-TW') 可能不報錯但 speak 沒聲音。
+    // 因此這裡會依序嘗試多個常見中文 locale，直到成功。
+    List<dynamic> langs = const [];
+    try {
+      final r = await _tts.getLanguages;
+      if (r is List) langs = r;
+    } catch (_) {
+      // ignore
+    }
+
+    bool supports(String code) {
+      if (langs.isEmpty) return true; // 拿不到清單就直接嘗試
+      return langs.contains(code);
+    }
+
+    final candidates = <String>[
+      'zh-TW',
+      'zh-Hant',
+      'zh-Hant-TW',
+      'cmn-Hant-TW',
+      'zh-CN',
+      'zh',
+      'cmn-CN',
+    ];
+
+    String? chosen;
+    for (final c in candidates) {
+      if (!supports(c)) continue;
+      try {
+        await _tts.setLanguage(c);
+        chosen = c;
+        break;
+      } catch (_) {
+        // try next
+      }
+    }
+    if (chosen == null) return false;
+    _ttsLang = chosen;
+
+    // 讓發音更清楚：放慢一點、音高略提高
+    await _tts.setSpeechRate(0.40);
+    await _tts.setPitch(1.05);
+    await _tts.setVolume(1.0);
+    // 盡量等朗讀完成（避免連續點擊時互相蓋掉）
+    await _tts.awaitSpeakCompletion(true);
+
+    // 某些機型會在第一次 speak 才真正初始化音源；用很短的測試避免「第一次點沒聲音」
+    try {
+      await _tts.speak(' ');
+      await _tts.stop();
+    } catch (_) {
+      // ignore
+    }
+
+    return true;
+  }
+
   Future<void> _useAudioHint(String text, {required bool consume}) async {
     if (_isFinished) return;
     if (!_ttsReady) {
-      if (mounted) setState(() => _feedback = '語音不可用（TTS 初始化失敗）');
+      if (mounted) {
+        setState(() => _feedback = '語音不可用：請到手機「文字轉語音(TTS)」設定下載中文語音/切換引擎後再試。');
+      }
       return;
     }
     if (consume && _audioHintsLeft <= 0) {
@@ -1636,9 +1691,9 @@ class ThemedBackground extends StatelessWidget {
           top: 18,
           right: 10,
           child: Opacity(
-            opacity: 0.14,
+            opacity: 0.22,
             child: spec.decoTopAsset != null
-                ? Image.asset(spec.decoTopAsset!, width: 120, height: 120, fit: BoxFit.contain)
+                ? Image.asset(spec.decoTopAsset!, width: 170, height: 170, fit: BoxFit.contain)
                 : Icon(icons[0], size: 88),
           ),
         ),
@@ -1646,12 +1701,31 @@ class ThemedBackground extends StatelessWidget {
           bottom: 10,
           left: 10,
           child: Opacity(
-            opacity: 0.12,
+            opacity: 0.18,
             child: spec.decoBottomAsset != null
-                ? Image.asset(spec.decoBottomAsset!, width: 140, height: 140, fit: BoxFit.contain)
+                ? Image.asset(spec.decoBottomAsset!, width: 200, height: 200, fit: BoxFit.contain)
                 : Icon(icons[1], size: 110),
           ),
         ),
+        // 額外貼紙：讓「角色圖案」更明顯（仍保持不干擾閱讀）
+        if (spec.badgeAsset != null)
+          Positioned(
+            top: 86,
+            left: 14,
+            child: Opacity(
+              opacity: 0.10,
+              child: Image.asset(spec.badgeAsset!, width: 110, height: 110, fit: BoxFit.contain),
+            ),
+          ),
+        if (spec.badgeAsset != null)
+          Positioned(
+            bottom: 110,
+            right: 18,
+            child: Opacity(
+              opacity: 0.08,
+              child: Image.asset(spec.badgeAsset!, width: 120, height: 120, fit: BoxFit.contain),
+            ),
+          ),
         Positioned.fill(child: child),
       ],
     );
