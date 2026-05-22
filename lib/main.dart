@@ -151,6 +151,8 @@ class ThemeVisual {
   final String? badgeAsset; // 小圖示（設定頁/首頁顯示）
   final String? decoTopAsset; // 背景角落裝飾（PNG，透明底）
   final String? decoBottomAsset;
+  final String? heroAsset; // 背景主視覺（更大一張，透明底）
+  final String? iconDir; // 全站 icon（設定/音量/等級…）的資料夾
 
   const ThemeVisual({
     required this.colors,
@@ -158,6 +160,8 @@ class ThemeVisual {
     this.badgeAsset,
     this.decoTopAsset,
     this.decoBottomAsset,
+    this.heroAsset,
+    this.iconDir,
   });
 }
 
@@ -190,6 +194,8 @@ ThemeVisual themeVisual(ThemeStyle t) {
         badgeAsset: 'assets/themes/kuromi/badge.png',
         decoTopAsset: 'assets/themes/kuromi/deco_top.png',
         decoBottomAsset: 'assets/themes/kuromi/deco_bottom.png',
+        heroAsset: 'assets/themes/kuromi/hero.png',
+        iconDir: 'assets/themes/kuromi/icons',
       );
     case ThemeStyle.cinnamoroll:
       return const ThemeVisual(
@@ -198,6 +204,8 @@ ThemeVisual themeVisual(ThemeStyle t) {
         badgeAsset: 'assets/themes/cinnamoroll/badge.png',
         decoTopAsset: 'assets/themes/cinnamoroll/deco_top.png',
         decoBottomAsset: 'assets/themes/cinnamoroll/deco_bottom.png',
+        heroAsset: 'assets/themes/cinnamoroll/hero.png',
+        iconDir: 'assets/themes/cinnamoroll/icons',
       );
     case ThemeStyle.mymelody:
       return const ThemeVisual(
@@ -206,6 +214,8 @@ ThemeVisual themeVisual(ThemeStyle t) {
         badgeAsset: 'assets/themes/mymelody/badge.png',
         decoTopAsset: 'assets/themes/mymelody/deco_top.png',
         decoBottomAsset: 'assets/themes/mymelody/deco_bottom.png',
+        heroAsset: 'assets/themes/mymelody/hero.png',
+        iconDir: 'assets/themes/mymelody/icons',
       );
     case ThemeStyle.carbot:
       return const ThemeVisual(
@@ -214,6 +224,8 @@ ThemeVisual themeVisual(ThemeStyle t) {
         badgeAsset: 'assets/themes/carbot/badge.png',
         decoTopAsset: 'assets/themes/carbot/deco_top.png',
         decoBottomAsset: 'assets/themes/carbot/deco_bottom.png',
+        heroAsset: 'assets/themes/carbot/hero.png',
+        iconDir: 'assets/themes/carbot/icons',
       );
     case ThemeStyle.ultraman:
       return const ThemeVisual(
@@ -222,6 +234,8 @@ ThemeVisual themeVisual(ThemeStyle t) {
         badgeAsset: 'assets/themes/ultraman/badge.png',
         decoTopAsset: 'assets/themes/ultraman/deco_top.png',
         decoBottomAsset: 'assets/themes/ultraman/deco_bottom.png',
+        heroAsset: 'assets/themes/ultraman/hero.png',
+        iconDir: 'assets/themes/ultraman/icons',
       );
   }
 }
@@ -233,6 +247,46 @@ Widget _themeBadge(ThemeStyle t, {double size = 22}) {
     borderRadius: BorderRadius.circular(6),
     child: Image.asset(asset, width: size, height: size, fit: BoxFit.contain),
   );
+}
+
+String? _themeIconAsset(ThemeStyle t, String key) {
+  final dir = themeVisual(t).iconDir;
+  if (dir == null) return null;
+  return '$dir/$key.png';
+}
+
+Widget _themedIcon(
+  ThemeStyle t, {
+  required String key,
+  required IconData fallback,
+  double size = 24,
+}) {
+  final asset = _themeIconAsset(t, key);
+  if (asset == null) return Icon(fallback, size: size);
+  return Image.asset(asset, width: size, height: size, fit: BoxFit.contain);
+}
+
+String _levelIconKey(EducationLevel l) {
+  switch (l) {
+    case EducationLevel.elementary:
+      return 'level_elementary';
+    case EducationLevel.juniorHigh:
+      return 'level_juniorHigh';
+    case EducationLevel.seniorHigh:
+      return 'level_seniorHigh';
+    case EducationLevel.university:
+      return 'level_university';
+    case EducationLevel.graduate:
+      return 'level_graduate';
+    case EducationLevel.working:
+      return 'level_working';
+    case EducationLevel.expert:
+      return 'level_expert';
+    case EducationLevel.scholar:
+      return 'level_scholar';
+    case EducationLevel.master:
+      return 'level_master';
+  }
 }
 
 class GameGoal {
@@ -409,14 +463,16 @@ class _HomePageState extends State<HomePage> {
           IconButton(
             tooltip: '日誌',
             onPressed: () {
-              Navigator.of(context).push(MaterialPageRoute(builder: (_) => const LogPage(title: '程式日誌')));
+              Navigator.of(context).push(MaterialPageRoute(
+                builder: (_) => LogPage(title: '程式日誌', themeStyle: _settings.themeStyle),
+              ));
             },
-            icon: const Icon(Icons.article_outlined),
+            icon: _themedIcon(_settings.themeStyle, key: 'log', fallback: Icons.article_outlined),
           ),
           IconButton(
             tooltip: '設定',
             onPressed: _openSettings,
-            icon: const Icon(Icons.settings),
+            icon: _themedIcon(_settings.themeStyle, key: 'settings', fallback: Icons.settings),
           ),
         ],
       ),
@@ -448,7 +504,12 @@ class _HomePageState extends State<HomePage> {
                     Text('玩法：${playModeLabel(_settings.playMode)}'),
                     Row(
                       children: [
-                        Icon(levelIcon(_settings.level), size: 18),
+                        _themedIcon(
+                          _settings.themeStyle,
+                          key: _levelIconKey(_settings.level),
+                          fallback: levelIcon(_settings.level),
+                          size: 18,
+                        ),
                         const SizedBox(width: 6),
                         Text('等級：${levelLabel(_settings.level)}'),
                         const SizedBox(width: 12),
@@ -623,7 +684,7 @@ class _SettingsPageState extends State<SettingsPage> {
                 value: l,
                 child: Row(
                   children: [
-                    Icon(levelIcon(l), size: 18),
+                    _themedIcon(_themeStyle, key: _levelIconKey(l), fallback: levelIcon(l), size: 18),
                     const SizedBox(width: 8),
                     Text(levelLabel(l)),
                   ],
@@ -744,7 +805,7 @@ class _SettingsPageState extends State<SettingsPage> {
               Expanded(child: Text(goalSummary(_playMode, _goal), style: const TextStyle(color: Colors.black87))),
               OutlinedButton.icon(
                 onPressed: _editGoal,
-                icon: const Icon(Icons.tune),
+                icon: _themedIcon(_themeStyle, key: 'tune', fallback: Icons.tune),
                 label: const Text('目標'),
               ),
             ],
@@ -1307,7 +1368,12 @@ class _GamePageState extends State<GamePage> {
               child: Center(
                 child: Row(
                   children: [
-                    Icon(levelIcon(widget.level), size: 18),
+                    _themedIcon(
+                      widget.themeStyle,
+                      key: _levelIconKey(widget.level),
+                      fallback: levelIcon(widget.level),
+                      size: 18,
+                    ),
                     const SizedBox(width: 4),
                     Text(levelLabel(widget.level)),
                   ],
@@ -1351,7 +1417,7 @@ class _GamePageState extends State<GamePage> {
                                 const SizedBox(height: 12),
                                 FilledButton.icon(
                                   onPressed: _init,
-                                  icon: const Icon(Icons.refresh),
+                                  icon: _themedIcon(widget.themeStyle, key: 'refresh', fallback: Icons.refresh),
                                   label: const Text('重試'),
                                 ),
                               ],
@@ -1442,7 +1508,7 @@ class _GamePageState extends State<GamePage> {
               OutlinedButton.icon(
                 // A 題型：聽音猜字，為避免聽不清楚，不限制重聽次數
                 onPressed: _canUseAudioHintUnlimited ? () => _useAudioHint(q.word, consume: false) : null,
-                icon: const Icon(Icons.volume_up),
+                icon: _themedIcon(widget.themeStyle, key: 'volume', fallback: Icons.volume_up),
                 label: const Text('再聽一次（不限次）'),
               ),
             ],
@@ -1478,7 +1544,7 @@ class _GamePageState extends State<GamePage> {
               const SizedBox(height: 8),
               OutlinedButton.icon(
                 onPressed: _canUseAudioHintLimited ? () => _useAudioHint(q.character, consume: true) : null,
-                icon: const Icon(Icons.volume_up),
+                icon: _themedIcon(widget.themeStyle, key: 'volume', fallback: Icons.volume_up),
                 label: Text('唸一遍（剩$_audioHintsLeft）'),
               ),
             ],
@@ -1613,7 +1679,7 @@ class _GamePageState extends State<GamePage> {
               const SizedBox(height: 8),
               OutlinedButton.icon(
                 onPressed: _canUseAudioHintLimited ? () => _useAudioHint(q.word, consume: true) : null,
-                icon: const Icon(Icons.volume_up),
+                icon: _themedIcon(widget.themeStyle, key: 'volume', fallback: Icons.volume_up),
                 label: Text('唸一遍（剩$_audioHintsLeft）'),
               ),
             ],
@@ -1649,7 +1715,7 @@ class _GamePageState extends State<GamePage> {
               const SizedBox(height: 8),
               OutlinedButton.icon(
                 onPressed: _canUseAudioHintLimited ? () => _useAudioHint(q.currentWord, consume: true) : null,
-                icon: const Icon(Icons.volume_up),
+                icon: _themedIcon(widget.themeStyle, key: 'volume', fallback: Icons.volume_up),
                 label: Text('再聽一次（剩$_audioHintsLeft）'),
               ),
             ],
@@ -1686,6 +1752,18 @@ class ThemedBackground extends StatelessWidget {
             ),
           ),
         ),
+        // 主視覺（大角色）：低透明度當水印，不擋文字
+        if (spec.heroAsset != null)
+          Positioned.fill(
+            child: IgnorePointer(
+              child: Center(
+                child: Opacity(
+                  opacity: 0.10,
+                  child: Image.asset(spec.heroAsset!, width: 520, height: 520, fit: BoxFit.contain),
+                ),
+              ),
+            ),
+          ),
         // 裝飾圖案：低透明度、避免遮擋內容（放在邊角）
         Positioned(
           top: 18,
