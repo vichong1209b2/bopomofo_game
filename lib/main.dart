@@ -1140,6 +1140,12 @@ class _GamePageState extends State<GamePage> {
         ThemeStyle.ocean => (const Color(0xFF00695C), const Color(0xFFB71C1C)),
         ThemeStyle.forest => (const Color(0xFF1B5E20), const Color(0xFFC62828)),
         ThemeStyle.night => (const Color(0xFF2E7D32), const Color(0xFFD32F2F)),
+        // 新主題：仍維持「答對=偏綠、答錯=偏紅」，但略調整色相以符合主題氛圍
+        ThemeStyle.kuromi => (const Color(0xFF2E7D32), const Color(0xFFD81B60)),
+        ThemeStyle.cinnamoroll => (const Color(0xFF00796B), const Color(0xFFC62828)),
+        ThemeStyle.mymelody => (const Color(0xFF2E7D32), const Color(0xFFD81B60)),
+        ThemeStyle.carbot => (const Color(0xFF1B5E20), const Color(0xFFB71C1C)),
+        ThemeStyle.ultraman => (const Color(0xFF2E7D32), const Color(0xFFD32F2F)),
       };
 
   ButtonStyle _styleForOption({required String opt, required String answer}) {
