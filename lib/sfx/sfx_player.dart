@@ -61,20 +61,26 @@ class SfxPlayer {
   }
 
   static Uint8List _makeCorrectWav() {
-    // 叮咚叮咚：兩段偏高音
+    // 叮咚叮咚：四下（高→低→高→低）
     final s = <double>[];
-    s.addAll(_tone(880, 0.12, 0.65));
+    s.addAll(_tone(988, 0.09, 0.70));
+    s.addAll(_silence(0.02));
+    s.addAll(_tone(784, 0.09, 0.70));
     s.addAll(_silence(0.03));
-    s.addAll(_tone(660, 0.14, 0.65));
+    s.addAll(_tone(988, 0.09, 0.70));
+    s.addAll(_silence(0.02));
+    s.addAll(_tone(784, 0.10, 0.70));
     return _toWavPcm16(s);
   }
 
   static Uint8List _makeWrongWav() {
-    // 答答：兩段偏低音
+    // 答答：兩下短低音 + 輕微雜訊（更像「敲」的感覺）
     final s = <double>[];
-    s.addAll(_tone(220, 0.09, 0.70));
-    s.addAll(_silence(0.04));
-    s.addAll(_tone(180, 0.11, 0.70));
+    s.addAll(_tone(180, 0.06, 0.78));
+    s.addAll(_noise(0.03, 0.20));
+    s.addAll(_silence(0.03));
+    s.addAll(_tone(160, 0.06, 0.78));
+    s.addAll(_noise(0.03, 0.20));
     return _toWavPcm16(s);
   }
 
@@ -91,6 +97,18 @@ class SfxPlayer {
       // 簡單衰減，避免「啪」的爆音
       final env = exp(-4 * t / seconds);
       out.add(amp * env * sin(2 * pi * freq * t));
+    }
+    return out;
+  }
+
+  static final _rng = Random();
+  static List<double> _noise(double seconds, double amp) {
+    final n = max(0, (seconds * _sr).round());
+    final out = <double>[];
+    for (var i = 0; i < n; i++) {
+      final t = i / _sr;
+      final env = exp(-10 * t / seconds);
+      out.add(amp * env * (_rng.nextDouble() * 2 - 1));
     }
     return out;
   }
@@ -138,4 +156,3 @@ class SfxPlayer {
     return bd.buffer.asUint8List();
   }
 }
-

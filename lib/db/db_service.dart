@@ -16,14 +16,32 @@ class DbService {
   DbService._(this._db);
   final Database _db;
 
+  // 讓「App 更新後的資料庫資源」可以覆蓋舊資料庫：
+  // - 避免使用者裝過舊版後，Documents 裡的舊 DB 一直不會更新
+  // - 不需要每次遊戲線上更新（維持離線）
+  static const int _enhancedAssetVersion = 1;
+  static const int _rawAssetVersion = 1;
+
   static Future<DbService> open({DataFlavor flavor = DataFlavor.enhanced}) async {
     final dir = await getApplicationDocumentsDirectory();
     final dbPath = p.join(dir.path, flavor == DataFlavor.enhanced ? 'moe_enhanced.db' : 'moe_raw.db');
+    final versionPath = '$dbPath.version';
+    final wantVersion = flavor == DataFlavor.enhanced ? _enhancedAssetVersion : _rawAssetVersion;
 
-    if (!File(dbPath).existsSync()) {
+    int haveVersion = -1;
+    if (File(versionPath).existsSync()) {
+      haveVersion = int.tryParse(File(versionPath).readAsStringSync().trim()) ?? -1;
+    }
+
+    final needCopy = !File(dbPath).existsSync() || haveVersion != wantVersion;
+    if (needCopy) {
       final asset = flavor == DataFlavor.enhanced ? 'assets/db/moe_enhanced.db' : 'assets/db/moe_raw.db';
       final bytes = await rootBundle.load(asset);
       await File(dbPath).writeAsBytes(bytes.buffer.asUint8List(), flush: true);
+      // version 檔寫入失敗也不影響遊戲（下一次還是會再 copy 一次而已）
+      try {
+        await File(versionPath).writeAsString('$wantVersion', flush: true);
+      } catch (_) {}
     }
 
     final db = await openDatabase(dbPath, readOnly: true);

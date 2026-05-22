@@ -132,20 +132,107 @@ String themeLabel(ThemeStyle t) {
       return '森林';
     case ThemeStyle.night:
       return '夜色';
+    case ThemeStyle.kuromi:
+      return '庫洛米風';
+    case ThemeStyle.cinnamoroll:
+      return '大耳狗風';
+    case ThemeStyle.mymelody:
+      return '美樂蒂風';
+    case ThemeStyle.carbot:
+      return '衝鋒戰士風';
+    case ThemeStyle.ultraman:
+      return '奧特曼風';
   }
 }
 
-({List<Color> colors, List<IconData> decoIcons}) themeSpec(ThemeStyle t) {
+class ThemeVisual {
+  final List<Color> colors;
+  final List<IconData> decoIcons;
+  final String? badgeAsset; // 小圖示（設定頁/首頁顯示）
+  final String? decoTopAsset; // 背景角落裝飾（PNG，透明底）
+  final String? decoBottomAsset;
+
+  const ThemeVisual({
+    required this.colors,
+    required this.decoIcons,
+    this.badgeAsset,
+    this.decoTopAsset,
+    this.decoBottomAsset,
+  });
+}
+
+ThemeVisual themeVisual(ThemeStyle t) {
   switch (t) {
     case ThemeStyle.sakura:
-      return (colors: const [Color(0xFFFFF1F7), Color(0xFFFFFFFF)], decoIcons: const [Icons.local_florist, Icons.favorite]);
+      return const ThemeVisual(
+        colors: [Color(0xFFFFF1F7), Color(0xFFFFFFFF)],
+        decoIcons: [Icons.local_florist, Icons.favorite],
+      );
     case ThemeStyle.ocean:
-      return (colors: const [Color(0xFFE7F6FF), Color(0xFFFFFFFF)], decoIcons: const [Icons.water_drop, Icons.waves]);
+      return const ThemeVisual(
+        colors: [Color(0xFFE7F6FF), Color(0xFFFFFFFF)],
+        decoIcons: [Icons.water_drop, Icons.waves],
+      );
     case ThemeStyle.forest:
-      return (colors: const [Color(0xFFEAF7EE), Color(0xFFFFFFFF)], decoIcons: const [Icons.park, Icons.eco]);
+      return const ThemeVisual(
+        colors: [Color(0xFFEAF7EE), Color(0xFFFFFFFF)],
+        decoIcons: [Icons.park, Icons.eco],
+      );
     case ThemeStyle.night:
-      return (colors: const [Color(0xFFEFEAFF), Color(0xFFFFFFFF)], decoIcons: const [Icons.nightlight_round, Icons.star]);
+      return const ThemeVisual(
+        colors: [Color(0xFFEFEAFF), Color(0xFFFFFFFF)],
+        decoIcons: [Icons.nightlight_round, Icons.star],
+      );
+    case ThemeStyle.kuromi:
+      return const ThemeVisual(
+        colors: [Color(0xFFF6ECFF), Color(0xFFFFFFFF)],
+        decoIcons: [Icons.favorite, Icons.auto_awesome],
+        badgeAsset: 'assets/themes/kuromi/badge.png',
+        decoTopAsset: 'assets/themes/kuromi/deco_top.png',
+        decoBottomAsset: 'assets/themes/kuromi/deco_bottom.png',
+      );
+    case ThemeStyle.cinnamoroll:
+      return const ThemeVisual(
+        colors: [Color(0xFFEAF7FF), Color(0xFFFFFFFF)],
+        decoIcons: [Icons.cloud, Icons.air],
+        badgeAsset: 'assets/themes/cinnamoroll/badge.png',
+        decoTopAsset: 'assets/themes/cinnamoroll/deco_top.png',
+        decoBottomAsset: 'assets/themes/cinnamoroll/deco_bottom.png',
+      );
+    case ThemeStyle.mymelody:
+      return const ThemeVisual(
+        colors: [Color(0xFFFFEEF5), Color(0xFFFFFFFF)],
+        decoIcons: [Icons.cake, Icons.favorite],
+        badgeAsset: 'assets/themes/mymelody/badge.png',
+        decoTopAsset: 'assets/themes/mymelody/deco_top.png',
+        decoBottomAsset: 'assets/themes/mymelody/deco_bottom.png',
+      );
+    case ThemeStyle.carbot:
+      return const ThemeVisual(
+        colors: [Color(0xFFEAF2FF), Color(0xFFFFFFFF)],
+        decoIcons: [Icons.smart_toy, Icons.flash_on],
+        badgeAsset: 'assets/themes/carbot/badge.png',
+        decoTopAsset: 'assets/themes/carbot/deco_top.png',
+        decoBottomAsset: 'assets/themes/carbot/deco_bottom.png',
+      );
+    case ThemeStyle.ultraman:
+      return const ThemeVisual(
+        colors: [Color(0xFFFFEFEF), Color(0xFFFFFFFF)],
+        decoIcons: [Icons.shield, Icons.bolt],
+        badgeAsset: 'assets/themes/ultraman/badge.png',
+        decoTopAsset: 'assets/themes/ultraman/deco_top.png',
+        decoBottomAsset: 'assets/themes/ultraman/deco_bottom.png',
+      );
   }
+}
+
+Widget _themeBadge(ThemeStyle t, {double size = 22}) {
+  final asset = themeVisual(t).badgeAsset;
+  if (asset == null) return const SizedBox(width: 0, height: 0);
+  return ClipRRect(
+    borderRadius: BorderRadius.circular(6),
+    child: Image.asset(asset, width: size, height: size, fit: BoxFit.contain),
+  );
 }
 
 class GameGoal {
@@ -365,8 +452,8 @@ class _HomePageState extends State<HomePage> {
                         const SizedBox(width: 6),
                         Text('等級：${levelLabel(_settings.level)}'),
                         const SizedBox(width: 12),
-                        const Icon(Icons.palette_outlined, size: 18),
-                        const SizedBox(width: 6),
+                        _themeBadge(_settings.themeStyle, size: 18),
+                        const SizedBox(width: 8),
                         Text('主題：${themeLabel(_settings.themeStyle)}'),
                       ],
                     ),
@@ -552,7 +639,16 @@ class _SettingsPageState extends State<SettingsPage> {
           DropdownButtonFormField<ThemeStyle>(
             value: _themeStyle,
             items: ThemeStyle.values
-                .map((t) => DropdownMenuItem(value: t, child: Text(themeLabel(t))))
+                .map((t) => DropdownMenuItem(
+                      value: t,
+                      child: Row(
+                        children: [
+                          _themeBadge(t, size: 20),
+                          if (themeVisual(t).badgeAsset != null) const SizedBox(width: 8),
+                          Text(themeLabel(t)),
+                        ],
+                      ),
+                    ))
                 .toList(),
             onChanged: (v) => setState(() => _themeStyle = v!),
             decoration: const InputDecoration(border: OutlineInputBorder()),
@@ -1513,7 +1609,7 @@ class ThemedBackground extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final spec = themeSpec(themeStyle);
+    final spec = themeVisual(themeStyle);
     final icons = spec.decoIcons;
 
     return Stack(
@@ -1531,19 +1627,23 @@ class ThemedBackground extends StatelessWidget {
         ),
         // 裝飾圖案：低透明度、避免遮擋內容（放在邊角）
         Positioned(
-          top: 30,
-          right: 18,
+          top: 18,
+          right: 10,
           child: Opacity(
-            opacity: 0.10,
-            child: Icon(icons[0], size: 88),
+            opacity: 0.14,
+            child: spec.decoTopAsset != null
+                ? Image.asset(spec.decoTopAsset!, width: 120, height: 120, fit: BoxFit.contain)
+                : Icon(icons[0], size: 88),
           ),
         ),
         Positioned(
-          bottom: 24,
-          left: 18,
+          bottom: 10,
+          left: 10,
           child: Opacity(
-            opacity: 0.08,
-            child: Icon(icons[1], size: 110),
+            opacity: 0.12,
+            child: spec.decoBottomAsset != null
+                ? Image.asset(spec.decoBottomAsset!, width: 140, height: 140, fit: BoxFit.contain)
+                : Icon(icons[1], size: 110),
           ),
         ),
         Positioned.fill(child: child),

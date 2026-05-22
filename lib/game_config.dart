@@ -23,6 +23,12 @@ enum ThemeStyle {
   ocean,
   forest,
   night,
+  // 以下為新增主題（以靈感相似的原創風格呈現，避免直接複製原作素材）
+  kuromi,
+  cinnamoroll,
+  mymelody,
+  carbot,
+  ultraman,
 }
 
 /// 給 DbService 用的等級規則（避免 UI 端 Icon/Color 依賴 material）。
