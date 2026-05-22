@@ -3,7 +3,6 @@ import 'dart:math';
 
 import 'package:flutter/services.dart';
 import 'package:path/path.dart' as p;
-import 'package:path_provider/path_provider.dart';
 import 'package:sqflite/sqflite.dart';
 
 import '../game_config.dart';
@@ -23,8 +22,10 @@ class DbService {
   static const int _rawAssetVersion = 1;
 
   static Future<DbService> open({DataFlavor flavor = DataFlavor.enhanced}) async {
-    final dir = await getApplicationDocumentsDirectory();
-    final dbPath = p.join(dir.path, flavor == DataFlavor.enhanced ? 'moe_enhanced.db' : 'moe_raw.db');
+    // 使用 sqflite 的 databases 目錄（比 Documents 更符合 DB 用途，且在部分機型上更穩定）
+    final dbDir = await getDatabasesPath();
+    await Directory(dbDir).create(recursive: true);
+    final dbPath = p.join(dbDir, flavor == DataFlavor.enhanced ? 'moe_enhanced.db' : 'moe_raw.db');
     final versionPath = '$dbPath.version';
     final wantVersion = flavor == DataFlavor.enhanced ? _enhancedAssetVersion : _rawAssetVersion;
 
@@ -36,12 +37,14 @@ class DbService {
     final needCopy = !File(dbPath).existsSync() || haveVersion != wantVersion;
     if (needCopy) {
       final asset = flavor == DataFlavor.enhanced ? 'assets/db/moe_enhanced.db' : 'assets/db/moe_raw.db';
+      AppLogger.log('[DB] copy asset to $dbPath (wantVersion=$wantVersion haveVersion=$haveVersion)');
       final bytes = await rootBundle.load(asset);
       await File(dbPath).writeAsBytes(bytes.buffer.asUint8List(), flush: true);
       // version 檔寫入失敗也不影響遊戲（下一次還是會再 copy 一次而已）
       try {
         await File(versionPath).writeAsString('$wantVersion', flush: true);
       } catch (_) {}
+      AppLogger.log('[DB] copy done');
     }
 
     final db = await openDatabase(dbPath, readOnly: true);

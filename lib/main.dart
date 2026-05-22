@@ -245,7 +245,14 @@ Widget _themeBadge(ThemeStyle t, {double size = 22}) {
   if (asset == null) return const SizedBox(width: 0, height: 0);
   return ClipRRect(
     borderRadius: BorderRadius.circular(6),
-    child: Image.asset(asset, width: size, height: size, fit: BoxFit.contain),
+    child: Image.asset(
+      asset,
+      width: size,
+      height: size,
+      fit: BoxFit.contain,
+      // 某些 build/裝置若 asset manifest 沒帶到主題圖（或路徑大小寫不一致），不要讓整個 UI 看起來像「按鈕消失」。
+      errorBuilder: (ctx, err, st) => Icon(Icons.image_not_supported_outlined, size: size, color: Colors.black26),
+    ),
   );
 }
 
@@ -263,7 +270,14 @@ Widget _themedIcon(
 }) {
   final asset = _themeIconAsset(t, key);
   if (asset == null) return Icon(fallback, size: size);
-  return Image.asset(asset, width: size, height: size, fit: BoxFit.contain);
+  return Image.asset(
+    asset,
+    width: size,
+    height: size,
+    fit: BoxFit.contain,
+    // 若主題 icon 載入失敗，直接退回 Material icon（避免首頁右上角「設定/日誌」看起來不見）。
+    errorBuilder: (ctx, err, st) => Icon(fallback, size: size),
+  );
 }
 
 String _levelIconKey(EducationLevel l) {
@@ -344,6 +358,9 @@ class GameSettings {
   final EducationLevel level;
   final ThemeStyle themeStyle;
   final bool soundEnabled; // 答對/答錯音效（不含 TTS）
+  // TTS（文字轉語音）設定：某些手機（如部分 realme/OPPO）需要指定 voice 才有聲音/不會卡住初始化。
+  final String? ttsVoiceName;
+  final String? ttsVoiceLocale;
 
   const GameSettings({
     required this.mode,
@@ -353,6 +370,8 @@ class GameSettings {
     required this.level,
     required this.themeStyle,
     required this.soundEnabled,
+    this.ttsVoiceName,
+    this.ttsVoiceLocale,
   });
 
   GameSettings copyWith({
@@ -363,6 +382,8 @@ class GameSettings {
     EducationLevel? level,
     ThemeStyle? themeStyle,
     bool? soundEnabled,
+    String? ttsVoiceName,
+    String? ttsVoiceLocale,
   }) {
     return GameSettings(
       mode: mode ?? this.mode,
@@ -372,6 +393,8 @@ class GameSettings {
       level: level ?? this.level,
       themeStyle: themeStyle ?? this.themeStyle,
       soundEnabled: soundEnabled ?? this.soundEnabled,
+      ttsVoiceName: ttsVoiceName ?? this.ttsVoiceName,
+      ttsVoiceLocale: ttsVoiceLocale ?? this.ttsVoiceLocale,
     );
   }
 }
@@ -540,6 +563,8 @@ class _HomePageState extends State<HomePage> {
                     level: _settings.level,
                     themeStyle: _settings.themeStyle,
                     soundEnabled: _settings.soundEnabled,
+                  ttsVoiceName: _settings.ttsVoiceName,
+                  ttsVoiceLocale: _settings.ttsVoiceLocale,
                   ),
                 ));
               },
@@ -570,6 +595,58 @@ class _SettingsPageState extends State<SettingsPage> {
   late EducationLevel _level = widget.initial.level;
   late ThemeStyle _themeStyle = widget.initial.themeStyle;
   late bool _soundEnabled = widget.initial.soundEnabled;
+  late String? _ttsVoiceName = widget.initial.ttsVoiceName;
+  late String? _ttsVoiceLocale = widget.initial.ttsVoiceLocale;
+
+  final FlutterTts _settingsTts = FlutterTts();
+  bool _voicesLoading = false;
+  String? _voicesError;
+  List<({String name, String locale})> _zhVoices = const [];
+
+  @override
+  void initState() {
+    super.initState();
+    _loadVoices();
+  }
+
+  @override
+  void dispose() {
+    _settingsTts.stop();
+    super.dispose();
+  }
+
+  Future<void> _loadVoices() async {
+    setState(() {
+      _voicesLoading = true;
+      _voicesError = null;
+    });
+    try {
+      final v = await _settingsTts.getVoices;
+      final out = <({String name, String locale})>[];
+      if (v is List) {
+        for (final it in v) {
+          if (it is Map) {
+            final name = (it['name'] ?? '').toString();
+            final locale = (it['locale'] ?? '').toString();
+            if (name.isEmpty || locale.isEmpty) continue;
+            // 常見中文 locale：zh / zh-TW / zh-CN / cmn-*
+            if (locale.startsWith('zh') || locale.startsWith('cmn')) {
+              out.add((name: name, locale: locale));
+            }
+          }
+        }
+      }
+      out.sort((a, b) => '${a.locale} ${a.name}'.compareTo('${b.locale} ${b.name}'));
+      if (!mounted) return;
+      setState(() => _zhVoices = out);
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _voicesError = e.toString());
+    } finally {
+      if (!mounted) return;
+      setState(() => _voicesLoading = false);
+    }
+  }
 
   Future<int?> _askInt({
     required String title,
@@ -657,6 +734,8 @@ class _SettingsPageState extends State<SettingsPage> {
       level: _level,
       themeStyle: _themeStyle,
       soundEnabled: _soundEnabled,
+      ttsVoiceName: _ttsVoiceName,
+      ttsVoiceLocale: _ttsVoiceLocale,
     ));
   }
 
@@ -722,6 +801,53 @@ class _SettingsPageState extends State<SettingsPage> {
             onChanged: (v) => setState(() => _soundEnabled = v),
             title: const Text('答對 / 答錯音效'),
             subtitle: const Text('答對：叮咚叮咚｜答錯：答答'),
+          ),
+          const SizedBox(height: 20),
+          const Text('語音（TTS）', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w600)),
+          const SizedBox(height: 8),
+          if (_voicesLoading)
+            const ListTile(
+              leading: SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2)),
+              title: Text('正在讀取可用語音...'),
+            )
+          else if (_voicesError != null)
+            ListTile(
+              title: const Text('讀取語音清單失敗'),
+              subtitle: Text(_voicesError!, style: const TextStyle(color: Colors.black54)),
+              trailing: OutlinedButton(onPressed: _loadVoices, child: const Text('重試')),
+            )
+          else
+            DropdownButtonFormField<String>(
+              value: (_ttsVoiceName != null && _ttsVoiceLocale != null) ? '${_ttsVoiceLocale!}||${_ttsVoiceName!}' : 'auto',
+              items: [
+                const DropdownMenuItem(value: 'auto', child: Text('自動（系統決定）')),
+                ..._zhVoices.map((v) {
+                  final key = '${v.locale}||${v.name}';
+                  return DropdownMenuItem(value: key, child: Text('${v.locale}｜${v.name}', overflow: TextOverflow.ellipsis));
+                }),
+              ],
+              onChanged: (val) {
+                if (val == null) return;
+                if (val == 'auto') {
+                  setState(() {
+                    _ttsVoiceName = null;
+                    _ttsVoiceLocale = null;
+                  });
+                  return;
+                }
+                final parts = val.split('||');
+                if (parts.length != 2) return;
+                setState(() {
+                  _ttsVoiceLocale = parts[0];
+                  _ttsVoiceName = parts[1];
+                });
+              },
+              decoration: const InputDecoration(border: OutlineInputBorder(), helperText: '若某些手機進遊戲一直轉圈圈/無朗讀，可嘗試手動指定語音。'),
+            ),
+          const SizedBox(height: 6),
+          const Text(
+            '提示：若仍無聲音，請到 Android 系統設定 →「文字轉語音(TTS)」下載中文語音/切換引擎。',
+            style: TextStyle(fontSize: 12, color: Colors.black54, height: 1.3),
           ),
           const SizedBox(height: 20),
           const Text('資料庫', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w600)),
@@ -830,6 +956,8 @@ class GamePage extends StatefulWidget {
     required this.level,
     required this.themeStyle,
     required this.soundEnabled,
+    this.ttsVoiceName,
+    this.ttsVoiceLocale,
   });
   final GameMode mode;
   final DataFlavor flavor;
@@ -838,6 +966,8 @@ class GamePage extends StatefulWidget {
   final EducationLevel level;
   final ThemeStyle themeStyle;
   final bool soundEnabled;
+  final String? ttsVoiceName;
+  final String? ttsVoiceLocale;
 
   @override
   State<GamePage> createState() => _GamePageState();
@@ -940,6 +1070,26 @@ class _GamePageState extends State<GamePage> {
   bool get _canUseAudioHintUnlimited => !_isFinished && _ttsReady;
 
   Future<bool> _setupTts() async {
+    // 若使用者指定了 voice，優先使用（可改善部分機型的中文朗讀/初始化問題）
+    if (widget.ttsVoiceName != null && widget.ttsVoiceLocale != null) {
+      try {
+        await _tts.setLanguage(widget.ttsVoiceLocale!);
+        await _tts.setVoice({'name': widget.ttsVoiceName!, 'locale': widget.ttsVoiceLocale!});
+        _ttsLang = widget.ttsVoiceLocale;
+        await _tts.setSpeechRate(0.40);
+        await _tts.setPitch(1.05);
+        await _tts.setVolume(1.0);
+        await _tts.awaitSpeakCompletion(true);
+        try {
+          await _tts.speak(' ');
+          await _tts.stop();
+        } catch (_) {}
+        return true;
+      } catch (_) {
+        // fall back to auto selection below
+      }
+    }
+
     // 為什麼要做 fallback：
     // 某些手機（例如部分 realme/OPPO 系）若沒有安裝/下載「中文語音資料」，setLanguage('zh-TW') 可能不報錯但 speak 沒聲音。
     // 因此這裡會依序嘗試多個常見中文 locale，直到成功。
@@ -1232,6 +1382,8 @@ class _GamePageState extends State<GamePage> {
                     level: widget.level,
                     themeStyle: widget.themeStyle,
                     soundEnabled: widget.soundEnabled,
+                    ttsVoiceName: widget.ttsVoiceName,
+                    ttsVoiceLocale: widget.ttsVoiceLocale,
                   ),
                 ));
               },

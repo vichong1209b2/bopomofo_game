@@ -40,7 +40,13 @@ class _LogPageState extends State<LogPage> {
   Widget _icon({required String key, required IconData fallback, double size = 24}) {
     final asset = _iconAsset(key);
     if (asset == null) return Icon(fallback, size: size);
-    return Image.asset(asset, width: size, height: size, fit: BoxFit.contain);
+    return Image.asset(
+      asset,
+      width: size,
+      height: size,
+      fit: BoxFit.contain,
+      errorBuilder: (ctx, err, st) => Icon(fallback, size: size),
+    );
   }
 
   ({List<Color> colors, String? heroAsset, String? decoTop, String? decoBottom, String? badge}) _bgSpec() {
@@ -156,7 +162,13 @@ class _LogPageState extends State<LogPage> {
                 child: Center(
                   child: Opacity(
                     opacity: 0.10,
-                    child: Image.asset(spec.heroAsset!, width: 520, height: 520, fit: BoxFit.contain),
+                    child: Image.asset(
+                      spec.heroAsset!,
+                      width: 520,
+                      height: 520,
+                      fit: BoxFit.contain,
+                      errorBuilder: (ctx, err, st) => const SizedBox.shrink(),
+                    ),
                   ),
                 ),
               ),
@@ -165,19 +177,43 @@ class _LogPageState extends State<LogPage> {
             Positioned(
               top: 18,
               right: 10,
-              child: Opacity(opacity: 0.22, child: Image.asset(spec.decoTop!, width: 170, height: 170)),
+              child: Opacity(
+                opacity: 0.22,
+                child: Image.asset(
+                  spec.decoTop!,
+                  width: 170,
+                  height: 170,
+                  errorBuilder: (ctx, err, st) => const SizedBox.shrink(),
+                ),
+              ),
             ),
           if (spec.decoBottom != null)
             Positioned(
               bottom: 10,
               left: 10,
-              child: Opacity(opacity: 0.18, child: Image.asset(spec.decoBottom!, width: 200, height: 200)),
+              child: Opacity(
+                opacity: 0.18,
+                child: Image.asset(
+                  spec.decoBottom!,
+                  width: 200,
+                  height: 200,
+                  errorBuilder: (ctx, err, st) => const SizedBox.shrink(),
+                ),
+              ),
             ),
           if (spec.badge != null)
             Positioned(
               top: 86,
               left: 14,
-              child: Opacity(opacity: 0.10, child: Image.asset(spec.badge!, width: 110, height: 110)),
+              child: Opacity(
+                opacity: 0.10,
+                child: Image.asset(
+                  spec.badge!,
+                  width: 110,
+                  height: 110,
+                  errorBuilder: (ctx, err, st) => const SizedBox.shrink(),
+                ),
+              ),
             ),
           Padding(
             padding: const EdgeInsets.all(12),
