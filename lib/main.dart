@@ -622,20 +622,27 @@ class _SettingsPageState extends State<SettingsPage> {
     });
     try {
       final v = await _settingsTts.getVoices;
-      final out = <({String name, String locale})>[];
+      final zh = <({String name, String locale})>[];
+      final all = <({String name, String locale})>[];
       if (v is List) {
         for (final it in v) {
           if (it is Map) {
             final name = (it['name'] ?? '').toString();
-            final locale = (it['locale'] ?? '').toString();
+            var locale = (it['locale'] ?? '').toString();
             if (name.isEmpty || locale.isEmpty) continue;
+            // 有些裝置回傳 zh_TW 這種格式，先標準化
+            locale = locale.replaceAll('_', '-');
+
+            all.add((name: name, locale: locale));
             // 常見中文 locale：zh / zh-TW / zh-CN / cmn-*
             if (locale.startsWith('zh') || locale.startsWith('cmn')) {
-              out.add((name: name, locale: locale));
+              zh.add((name: name, locale: locale));
             }
           }
         }
       }
+      // 若抓不到中文語音，至少把所有語音都列出，讓使用者能手動試（部分 realme 會回傳奇怪的 locale）
+      final out = zh.isNotEmpty ? zh : all;
       out.sort((a, b) => '${a.locale} ${a.name}'.compareTo('${b.locale} ${b.name}'));
       if (!mounted) return;
       setState(() => _zhVoices = out);
@@ -980,6 +987,7 @@ class _GamePageState extends State<GamePage> {
   bool _ttsReady = false;
   String? _ttsLang; // 實際使用的 TTS 語言（不同手機支援狀況不同）
   late int _audioHintsLeft;
+  bool _questionLoading = false;
 
   int _score = 0;
   int _questions = 0; // 作答題數：每題/每輪只算 1 次（答錯重試不會一直 +1）
@@ -1026,7 +1034,12 @@ class _GamePageState extends State<GamePage> {
 
   Future<void> _init() async {
     try {
-      final db = await DbService.open(flavor: widget.flavor);
+      AppLogger.log('[Game] init start flavor=${widget.flavor}');
+      final db = await _withTimeout(
+        () => DbService.open(flavor: widget.flavor),
+        seconds: 20,
+        label: 'open_db',
+      );
       if (!mounted) return;
       setState(() {
         _db = db;
@@ -1063,6 +1076,19 @@ class _GamePageState extends State<GamePage> {
     } catch (e) {
       if (!mounted) return;
       setState(() => _initError = e.toString());
+    }
+  }
+
+  Future<T> _withTimeout<T>(
+    Future<T> Function() fn, {
+    required int seconds,
+    required String label,
+  }) async {
+    try {
+      return await fn().timeout(Duration(seconds: seconds));
+    } catch (e, st) {
+      AppLogger.log('[Timeout] $label after ${seconds}s: $e\n$st');
+      rethrow;
     }
   }
 
@@ -1217,35 +1243,75 @@ class _GamePageState extends State<GamePage> {
 
     try {
       _activeMode = _pickActiveMode();
+      setState(() => _questionLoading = true);
+      AppLogger.log('[Q] next start mode=$_activeMode level=${widget.level}');
       if (_activeMode == GameMode.aAudioToChar) {
-        final q = await db.randomAudioToCharQuestion(level: widget.level);
+        final q = await _withTimeout(
+          () => db.randomAudioToCharQuestion(level: widget.level),
+          seconds: 12,
+          label: 'qA',
+        );
+        if (!mounted) return;
         setState(() => _qA = q);
         // 朗讀詞語（注音本身 TTS 不一定能順利朗讀）
         if (_ttsReady) {
           await _tts.speak(q.word);
         }
       } else if (_activeMode == GameMode.bCharToBopo) {
-        final q = await db.randomCharToBopoQuestion(level: widget.level);
+        final q = await _withTimeout(
+          () => db.randomCharToBopoQuestion(level: widget.level),
+          seconds: 12,
+          label: 'qB',
+        );
+        if (!mounted) return;
         setState(() => _qB = q);
       } else if (_activeMode == GameMode.cPairing) {
-        final q = await db.randomPairingRound(level: widget.level);
+        final q = await _withTimeout(
+          () => db.randomPairingRound(level: widget.level),
+          seconds: 12,
+          label: 'qC',
+        );
+        if (!mounted) return;
         setState(() => _qC = q);
       } else if (_activeMode == GameMode.dBopoToChar) {
-        final q = await db.randomBopoToCharQuestion(level: widget.level);
+        final q = await _withTimeout(
+          () => db.randomBopoToCharQuestion(level: widget.level),
+          seconds: 12,
+          label: 'qD',
+        );
+        if (!mounted) return;
         setState(() => _qD = q);
       } else if (_activeMode == GameMode.eWordToBopo) {
-        final q = await db.randomWordToBopoQuestion(level: widget.level);
+        final q = await _withTimeout(
+          () => db.randomWordToBopoQuestion(level: widget.level),
+          seconds: 12,
+          label: 'qE',
+        );
+        if (!mounted) return;
         setState(() => _qE = q);
       } else if (_activeMode == GameMode.fWordChain) {
-        final q = await db.randomWordChainQuestion(currentWord: _chainCurrentWord, level: widget.level);
+        final q = await _withTimeout(
+          () => db.randomWordChainQuestion(currentWord: _chainCurrentWord, level: widget.level),
+          seconds: 12,
+          label: 'qF',
+        );
+        if (!mounted) return;
         setState(() => _qF = q);
         // 為了清楚一點：自動唸出目前詞語（接龍提示）
         if (_ttsReady) {
           await _tts.speak(q.currentWord);
         }
       }
+      if (mounted) setState(() => _questionLoading = false);
+      AppLogger.log('[Q] next done mode=$_activeMode');
     } catch (e) {
-      setState(() => _feedback = '出題失敗：$e');
+      if (mounted) {
+        setState(() {
+          _questionLoading = false;
+          _feedback = e is TimeoutException ? '出題逾時：請按「下一題」重試，或回設定改成其他題型/等級' : '出題失敗：$e';
+        });
+      }
+      AppLogger.log('[Q] next error mode=$_activeMode: $e');
     }
   }
 
@@ -1911,7 +1977,13 @@ class ThemedBackground extends StatelessWidget {
               child: Center(
                 child: Opacity(
                   opacity: 0.10,
-                  child: Image.asset(spec.heroAsset!, width: 520, height: 520, fit: BoxFit.contain),
+                  child: Image.asset(
+                    spec.heroAsset!,
+                    width: 520,
+                    height: 520,
+                    fit: BoxFit.contain,
+                    errorBuilder: (ctx, err, st) => const SizedBox.shrink(),
+                  ),
                 ),
               ),
             ),
@@ -1923,7 +1995,13 @@ class ThemedBackground extends StatelessWidget {
           child: Opacity(
             opacity: 0.22,
             child: spec.decoTopAsset != null
-                ? Image.asset(spec.decoTopAsset!, width: 170, height: 170, fit: BoxFit.contain)
+                ? Image.asset(
+                    spec.decoTopAsset!,
+                    width: 170,
+                    height: 170,
+                    fit: BoxFit.contain,
+                    errorBuilder: (ctx, err, st) => Icon(icons[0], size: 88),
+                  )
                 : Icon(icons[0], size: 88),
           ),
         ),
@@ -1933,7 +2011,13 @@ class ThemedBackground extends StatelessWidget {
           child: Opacity(
             opacity: 0.18,
             child: spec.decoBottomAsset != null
-                ? Image.asset(spec.decoBottomAsset!, width: 200, height: 200, fit: BoxFit.contain)
+                ? Image.asset(
+                    spec.decoBottomAsset!,
+                    width: 200,
+                    height: 200,
+                    fit: BoxFit.contain,
+                    errorBuilder: (ctx, err, st) => Icon(icons[1], size: 110),
+                  )
                 : Icon(icons[1], size: 110),
           ),
         ),
@@ -1944,7 +2028,13 @@ class ThemedBackground extends StatelessWidget {
             left: 14,
             child: Opacity(
               opacity: 0.10,
-              child: Image.asset(spec.badgeAsset!, width: 110, height: 110, fit: BoxFit.contain),
+              child: Image.asset(
+                spec.badgeAsset!,
+                width: 110,
+                height: 110,
+                fit: BoxFit.contain,
+                errorBuilder: (ctx, err, st) => const SizedBox.shrink(),
+              ),
             ),
           ),
         if (spec.badgeAsset != null)
@@ -1953,7 +2043,13 @@ class ThemedBackground extends StatelessWidget {
             right: 18,
             child: Opacity(
               opacity: 0.08,
-              child: Image.asset(spec.badgeAsset!, width: 120, height: 120, fit: BoxFit.contain),
+              child: Image.asset(
+                spec.badgeAsset!,
+                width: 120,
+                height: 120,
+                fit: BoxFit.contain,
+                errorBuilder: (ctx, err, st) => const SizedBox.shrink(),
+              ),
             ),
           ),
         Positioned.fill(child: child),

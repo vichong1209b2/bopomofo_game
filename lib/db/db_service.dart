@@ -14,6 +14,7 @@ enum DataFlavor { enhanced, raw }
 class DbService {
   DbService._(this._db);
   final Database _db;
+  int? _maxWordIdCache;
 
   // 讓「App 更新後的資料庫資源」可以覆蓋舊資料庫：
   // - 避免使用者裝過舊版後，Documents 裡的舊 DB 一直不會更新
@@ -47,11 +48,55 @@ class DbService {
       AppLogger.log('[DB] copy done');
     }
 
-    final db = await openDatabase(dbPath, readOnly: true);
+    // 部分機型（例如某些 realme/OPPO）在 readOnly + singleInstance 可能出現不明卡住；
+    // 這裡改成 readOnly=false 且 singleInstance=false（我們不會寫入資料表，只讀查詢）。
+    AppLogger.log('[DB] openDatabase start: $dbPath');
+    final db = await openDatabase(dbPath, readOnly: false, singleInstance: false);
+    AppLogger.log('[DB] openDatabase done');
     return DbService._(db);
   }
 
   Future<void> close() => _db.close();
+
+  Future<int> _maxWordId() async {
+    final cached = _maxWordIdCache;
+    if (cached != null) return cached;
+    final rows = await _db.rawQuery('SELECT MAX(word_id) AS m FROM word');
+    final m = (rows.isNotEmpty ? (rows.first['m'] as int?) : null) ?? 0;
+    _maxWordIdCache = m;
+    return m;
+  }
+
+  /// 取代 `ORDER BY RANDOM() LIMIT 1`（那個會全表掃描，某些手機可能看起來像卡住）
+  /// 用「隨機起點 + 依 word_id 掃描」來取一筆，並在找不到時回退到原本的 RANDOM 作保底。
+  Future<List<Map<String, Object?>>> _randomWordPick({
+    required String selectSql, // 例如: "SELECT w.word_id, w.word, w.bopomofo FROM word w"
+    required String whereSql, // 不要加 WHERE 關鍵字
+    required List<Object?> args,
+    int tries = 6,
+  }) async {
+    final maxId = await _maxWordId();
+    if (maxId <= 0) {
+      return _db.rawQuery('$selectSql WHERE $whereSql ORDER BY RANDOM() LIMIT 1', args);
+    }
+    final rnd = Random();
+    for (var i = 0; i < tries; i++) {
+      final start = rnd.nextInt(maxId + 1);
+      // 先往後找
+      final rows1 = await _db.rawQuery(
+        '$selectSql WHERE $whereSql AND w.word_id >= ? ORDER BY w.word_id LIMIT 1',
+        [...args, start],
+      );
+      if (rows1.isNotEmpty) return rows1;
+      // 再從頭繞回
+      final rows2 = await _db.rawQuery(
+        '$selectSql WHERE $whereSql AND w.word_id < ? ORDER BY w.word_id LIMIT 1',
+        [...args, start],
+      );
+      if (rows2.isNotEmpty) return rows2;
+    }
+    return _db.rawQuery('$selectSql WHERE $whereSql ORDER BY RANDOM() LIMIT 1', args);
+  }
 
   // ====== 等級過濾（教育分級） ======
 
@@ -190,15 +235,11 @@ class DbService {
           SELECT 1 FROM word_char wc
           WHERE wc.word_id = w.word_id AND wc.cp_id IS NOT NULL
         )''';
-        w = await _db.rawQuery(r'''
-      SELECT w.word_id, w.word, w.bopomofo
-      FROM word w
-      WHERE ''' +
-            where +
-            r'''
-      ORDER BY RANDOM()
-      LIMIT 1
-    ''', cand.args);
+        w = await _randomWordPick(
+          selectSql: 'SELECT w.word_id, w.word, w.bopomofo FROM word w',
+          whereSql: where.trim(),
+          args: cand.args,
+        );
         if (w.isNotEmpty) {
           usedNote = cand.note;
           usedAllowFlag = withAllow;
