@@ -1052,6 +1052,83 @@ class _SettingsPageState extends State<SettingsPage> {
             child: ListView(
               padding: const EdgeInsets.all(16),
               children: [
+                // 主題預覽：讓使用者一眼看到「角色圖/主題 icon 是否有套用成功」
+                if (themeVisual(_themeStyle).heroAsset != null || themeVisual(_themeStyle).badgeAsset != null)
+                  Card(
+                    child: Padding(
+                      padding: const EdgeInsets.all(12),
+                      child: Row(
+                        children: [
+                          if (themeVisual(_themeStyle).heroAsset != null)
+                            Opacity(
+                              opacity: 0.95,
+                              child: Image.asset(
+                                themeVisual(_themeStyle).heroAsset!,
+                                width: 72,
+                                height: 72,
+                                fit: BoxFit.contain,
+                                errorBuilder: (ctx, err, st) => const Icon(Icons.image_not_supported_outlined, size: 40),
+                              ),
+                            )
+                          else if (themeVisual(_themeStyle).badgeAsset != null)
+                            Image.asset(
+                              themeVisual(_themeStyle).badgeAsset!,
+                              width: 64,
+                              height: 64,
+                              fit: BoxFit.contain,
+                              errorBuilder: (ctx, err, st) => const Icon(Icons.image_not_supported_outlined, size: 40),
+                            ),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text('主題預覽：${themeLabel(_themeStyle)}', style: Theme.of(context).textTheme.titleMedium),
+                                const SizedBox(height: 8),
+                                Wrap(
+                                  spacing: 10,
+                                  runSpacing: 8,
+                                  crossAxisAlignment: WrapCrossAlignment.center,
+                                  children: [
+                                    Row(
+                                      mainAxisSize: MainAxisSize.min,
+                                      children: [
+                                        _themedIcon(_themeStyle, key: 'settings', fallback: Icons.settings, size: 20),
+                                        const SizedBox(width: 6),
+                                        const Text('設定'),
+                                      ],
+                                    ),
+                                    Row(
+                                      mainAxisSize: MainAxisSize.min,
+                                      children: [
+                                        _themedIcon(_themeStyle, key: 'log', fallback: Icons.article_outlined, size: 20),
+                                        const SizedBox(width: 6),
+                                        const Text('日誌'),
+                                      ],
+                                    ),
+                                    Row(
+                                      mainAxisSize: MainAxisSize.min,
+                                      children: [
+                                        _themedIcon(_themeStyle, key: 'volume', fallback: Icons.volume_up, size: 20),
+                                        const SizedBox(width: 6),
+                                        const Text('音量'),
+                                      ],
+                                    ),
+                                  ],
+                                ),
+                                const SizedBox(height: 6),
+                                Text(
+                                  '如果上面 icon 沒變或角色圖顯示破圖，表示該主題的資源沒有被打包進 APK。',
+                                  style: Theme.of(context).textTheme.bodySmall?.copyWith(color: Colors.black54),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                const SizedBox(height: 12),
           const Text('等級', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w600)),
           const SizedBox(height: 8),
           DropdownButtonFormField<EducationLevel>(
@@ -2414,19 +2491,18 @@ class ThemedBackground extends StatelessWidget {
             ),
           ),
         ),
-        // 主視覺（大角色）：低透明度當水印，不擋文字
+        // 主視覺（大角色）：用較明顯的透明度，讓「角色主題」真的看得出差異，但不遮擋文字。
         if (spec.heroAsset != null)
           Positioned.fill(
             child: IgnorePointer(
-              child: Center(
+              child: Align(
+                alignment: Alignment.bottomCenter,
                 child: Opacity(
-                  // 之前為了避免「題目看不到」把透明度壓太低，角色不明顯。
-                  // 目前改成更容易辨識但仍不會遮擋文字的強度。
-                  opacity: 0.18,
+                  opacity: 0.34,
                   child: Image.asset(
                     spec.heroAsset!,
-                    width: 560,
-                    height: 560,
+                    width: 420,
+                    height: 420,
                     fit: BoxFit.contain,
                     errorBuilder: (ctx, err, st) => const SizedBox.shrink(),
                   ),
@@ -2439,7 +2515,7 @@ class ThemedBackground extends StatelessWidget {
           top: 18,
           right: 10,
           child: Opacity(
-            opacity: 0.28,
+            opacity: 0.40,
             child: spec.decoTopAsset != null
                 ? Image.asset(
                     spec.decoTopAsset!,
@@ -2455,7 +2531,7 @@ class ThemedBackground extends StatelessWidget {
           bottom: 10,
           left: 10,
           child: Opacity(
-            opacity: 0.24,
+            opacity: 0.36,
             child: spec.decoBottomAsset != null
                 ? Image.asset(
                     spec.decoBottomAsset!,
@@ -2473,7 +2549,7 @@ class ThemedBackground extends StatelessWidget {
             top: 86,
             left: 14,
             child: Opacity(
-              opacity: 0.12,
+              opacity: 0.16,
               child: Image.asset(
                 spec.badgeAsset!,
                 width: 110,
@@ -2488,7 +2564,7 @@ class ThemedBackground extends StatelessWidget {
             bottom: 110,
             right: 18,
             child: Opacity(
-              opacity: 0.10,
+              opacity: 0.14,
               child: Image.asset(
                 spec.badgeAsset!,
                 width: 120,
