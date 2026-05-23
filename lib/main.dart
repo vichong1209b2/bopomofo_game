@@ -607,7 +607,7 @@ class _SettingsPageState extends State<SettingsPage> {
   final FlutterTts _settingsTts = FlutterTts();
   bool _enginesLoading = false;
   String? _enginesError;
-  List<String> _engines = const [];
+  List<({String id, String label})> _engines = const [];
   bool _voicesLoading = false;
   String? _voicesError;
   List<({String name, String locale})> _zhVoices = const [];
@@ -630,6 +630,29 @@ class _SettingsPageState extends State<SettingsPage> {
     return id;
   }
 
+  ({String id, String label})? _parseEngine(dynamic e) {
+    if (e == null) return null;
+    if (e is String) {
+      final id = e.trim();
+      if (id.isEmpty) return null;
+      return (id: id, label: _engineLabel(id));
+    }
+    if (e is Map) {
+      // flutter_tts 在部分平台回傳 {name: xxx, label: yyy}
+      final id = (e['name'] ?? e['id'] ?? e['engine'] ?? e['packageName'] ?? '').toString().trim();
+      if (id.isEmpty) return null;
+      final label = (e['label'] ?? e['displayName'] ?? e['title'] ?? '').toString().trim();
+      return (id: id, label: label.isEmpty ? _engineLabel(id) : label);
+    }
+    final id = e.toString().trim();
+    if (id.isEmpty) return null;
+    // 若是 "{name: com.google.android.tts, label: ...}" 這種，盡量抽出 name
+    final m = RegExp(r'name:\s*([^,}]+)').firstMatch(id);
+    final extracted = (m != null ? m.group(1) : null)?.trim();
+    final finalId = (extracted != null && extracted.isNotEmpty) ? extracted : id;
+    return (id: finalId, label: _engineLabel(finalId));
+  }
+
   Future<void> _loadEnginesThenVoices() async {
     setState(() {
       _enginesLoading = true;
@@ -637,11 +660,13 @@ class _SettingsPageState extends State<SettingsPage> {
     });
     try {
       final r = await _settingsTts.getEngines;
-      final engines = <String>[];
+      final engines = <({String id, String label})>[];
       if (r is List) {
         for (final e in r) {
-          final s = e.toString();
-          if (s.isNotEmpty) engines.add(s);
+          final parsed = _parseEngine(e);
+          if (parsed == null) continue;
+          if (engines.any((x) => x.id == parsed.id)) continue;
+          engines.add(parsed);
         }
       }
       if (!mounted) return;
@@ -878,7 +903,7 @@ class _SettingsPageState extends State<SettingsPage> {
               value: (_ttsEngine == null || _ttsEngine!.isEmpty) ? 'auto' : _ttsEngine!,
               items: [
                 const DropdownMenuItem(value: 'auto', child: Text('自動（跟隨系統預設引擎）')),
-                ..._engines.map((e) => DropdownMenuItem(value: e, child: Text(_engineLabel(e), overflow: TextOverflow.ellipsis))),
+                ..._engines.map((e) => DropdownMenuItem(value: e.id, child: Text(e.label, overflow: TextOverflow.ellipsis))),
               ],
               onChanged: (val) async {
                 if (val == null) return;
@@ -1202,7 +1227,21 @@ class _GamePageState extends State<GamePage> {
     // 1) 引擎選擇
     try {
       final eng = await _tts.getEngines;
-      final engines = (eng is List) ? eng.map((e) => e.toString()).where((s) => s.isNotEmpty).toList() : <String>[];
+      final engines = <String>[];
+      if (eng is List) {
+        for (final e in eng) {
+          // 盡量從 Map 取出真正的 package name
+          String? id;
+          if (e is String) id = e.trim();
+          if (e is Map) id = (e['name'] ?? e['id'] ?? e['engine'] ?? e['packageName'] ?? '').toString().trim();
+          id ??= e.toString().trim();
+          if (id.isEmpty) continue;
+          final m = RegExp(r'name:\s*([^,}]+)').firstMatch(id);
+          if (m != null) id = m.group(1)!.trim();
+          if (!engines.contains(id)) engines.add(id);
+        }
+      }
+      AppLogger.log('[TTS] engines=${engines.join(",")}');
       // 若使用者指定 engine，優先；否則如果裝了 Google TTS，預設優先用它（特別適用於中國版手機裝了 Speech Services by Google 後）。
       final want = (widget.ttsEngine != null && widget.ttsEngine!.isNotEmpty)
           ? widget.ttsEngine!
