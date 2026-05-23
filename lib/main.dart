@@ -1269,11 +1269,12 @@ class _SettingsPageState extends State<SettingsPage> {
           ),
           const SizedBox(height: 16),
           FilledButton(onPressed: _save, child: const Text('儲存並返回')),
-          ],
-        ),
+            ],
+          ),
         ),
       ),
-    );
+    ),
+  );
   }
 }
 
