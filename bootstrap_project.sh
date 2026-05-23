@@ -33,17 +33,24 @@ if manifest.exists():
   s2 = re.sub(r'android:label="[^"]*"', f'android:label="{label}"', s)
 
   # Android 11+ 的 package visibility 會讓某些 API（例如列舉 TTS 引擎/voices）回傳空清單。
-  # 這裡加入 queries，允許查詢提供 TTS_SERVICE 的套件（包含 Google TTS）。
-  if "<queries>" not in s2:
-    queries = r'''
-  <queries>
+  # 這裡確保 manifest 有宣告可查詢 TTS_SERVICE（包含 Google TTS）。
+  tts_queries = r'''
     <intent>
       <action android:name="android.intent.action.TTS_SERVICE" />
     </intent>
     <package android:name="com.google.android.tts" />
+'''.rstrip("\n")
+  if "<queries>" not in s2:
+    queries = r'''
+  <queries>
+'''.rstrip("\n") + "\n" + tts_queries + r'''
   </queries>
 '''.rstrip("\n")
     s2 = re.sub(r'(<manifest[^>]*>)', r'\1\n' + queries, s2, count=1)
+  else:
+    # 已有 <queries> 但未包含 TTS 相關宣告：補進去
+    if "android.intent.action.TTS_SERVICE" not in s2:
+      s2 = re.sub(r'(</queries>)', tts_queries + r'\n  \1', s2, count=1)
 
   manifest.write_text(s2, encoding="utf-8")
 

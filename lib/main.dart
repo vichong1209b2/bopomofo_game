@@ -1247,6 +1247,15 @@ class _GamePageState extends State<GamePage> {
   bool get _canUseAudioHintUnlimited => !_isFinished && _ttsReady;
 
   Future<bool> _setupTts() async {
+    // 先註冊錯誤回呼（有些機型 init 失敗不會丟 exception，只會走 error handler）
+    try {
+      _tts.setErrorHandler((msg) {
+        AppLogger.log('[TTS] errorHandler: $msg');
+      });
+    } catch (_) {
+      // ignore
+    }
+
     // 1) 引擎選擇
     try {
       final eng = await _tts.getEngines;
@@ -1265,17 +1274,33 @@ class _GamePageState extends State<GamePage> {
         }
       }
       AppLogger.log('[TTS] engines=${engines.join(",")}');
-      // 若使用者指定 engine，優先；否則如果裝了 Google TTS，預設優先用它（特別適用於中國版手機裝了 Speech Services by Google 後）。
-      // 注意：某些手機 getEngines 可能回空，但 setEngine('com.google.android.tts') 仍然可用；因此即使 engines 空也允許嘗試。
-      final want = (widget.ttsEngine != null && widget.ttsEngine!.isNotEmpty)
-          ? widget.ttsEngine!
-          : (engines.contains('com.google.android.tts') ? 'com.google.android.tts' : 'com.google.android.tts');
-      if (want != null) {
-        try {
-          await _withTimeout(() => _tts.setEngine(want), seconds: 2, label: 'tts_set_engine');
-          AppLogger.log('[TTS] engine=$want');
-        } catch (e) {
-          AppLogger.log('[TTS] setEngine fail ($want): $e');
+      // 重要：在部分機型/ROM 上，當 getEngines() 回傳空清單時，強制 setEngine 反而會觸發
+      // TextToSpeech init error（status=-1），導致後續 speak 無聲。
+      //
+      // 因此策略改為：
+      // - 使用者明確指定 engine：才嘗試 setEngine（即使 engines 空也嘗試一次，但失敗就放棄回到系統預設）
+      // - 未指定 engine：只有在 engines 清單能確認「真的有安裝 Google TTS」時才優先用它
+      final forced = (widget.ttsEngine ?? '').trim();
+      const google = 'com.google.android.tts';
+      String? want;
+      if (forced.isNotEmpty) {
+        want = forced;
+      } else if (engines.contains(google)) {
+        want = google;
+      }
+
+      if (want != null && want.isNotEmpty) {
+        final shouldTry = forced.isNotEmpty || engines.isNotEmpty; // auto 模式下 engines 空就不要冒險 setEngine
+        if (shouldTry) {
+          try {
+            await _withTimeout(() => _tts.setEngine(want!), seconds: 4, label: 'tts_set_engine');
+            AppLogger.log('[TTS] engine=$want');
+          } catch (e) {
+            // 不把 setEngine 失敗當作致命錯誤：回退到系統預設引擎，讓後面的 setLanguage/speak 還有機會成功。
+            AppLogger.log('[TTS] setEngine fail ($want): $e');
+          }
+        } else {
+          AppLogger.log('[TTS] skip setEngine (engines empty, auto mode)');
         }
       }
     } catch (_) {
