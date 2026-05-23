@@ -70,6 +70,7 @@ enum GameMode {
   dBopoToChar,
   eWordToBopo,
   fWordChain,
+  gBopoChainGrid,
   mix,
 }
 
@@ -590,6 +591,8 @@ String modeLabel(GameMode m) {
       return 'E 看詞語選注音';
     case GameMode.fWordChain:
       return '接龍填空';
+    case GameMode.gBopoChainGrid:
+      return '注音接龍';
     case GameMode.mix:
       return '混合';
   }
@@ -1438,6 +1441,12 @@ class _SettingsPageState extends State<SettingsPage> {
             title: const Text('接龍填空：語詞接龍（選出下一個詞語）'),
           ),
           RadioListTile(
+            value: GameMode.gBopoChainGrid,
+            groupValue: _mode,
+            onChanged: (v) => setState(() => _mode = v!),
+            title: const Text('注音接龍（棋盤填空：點格子填注音，可重複使用）'),
+          ),
+          RadioListTile(
             value: GameMode.mix,
             groupValue: _mode,
             onChanged: (v) => setState(() => _mode = v!),
@@ -1541,6 +1550,13 @@ class _GamePageState extends State<GamePage> {
   BopoToCharQuestion? _qD;
   WordToBopoQuestion? _qE;
   WordChainQuestion? _qF;
+  BopoChainGridPuzzle? _qG;
+
+  // 注音接龍棋盤：作答狀態
+  int? _gridSelectedCell;
+  final Map<int, String> _gridFilled = {}; // cellIndex -> currently filled syllable
+  final Set<int> _gridWrongCells = {};
+  int _gridWrongTries = 0;
 
   // 接龍模式：上一題答對後，將答案作為下一題的 currentWord（形成連續接龍）
   String? _chainCurrentWord;
@@ -1808,6 +1824,7 @@ class _GamePageState extends State<GamePage> {
       GameMode.dBopoToChar,
       GameMode.eWordToBopo,
       GameMode.fWordChain,
+      // 注音接龍棋盤目前偏「關卡玩法」，先不放入混合模式，避免節奏差異太大
     ];
     pool.shuffle();
     return pool.first;
@@ -1826,9 +1843,14 @@ class _GamePageState extends State<GamePage> {
       _qD = null;
       _qE = null;
       _qF = null;
+      _qG = null;
       _pairingSelectedWord = null;
       _pairingMatchedWords.clear();
       _pairingMatchedBopos.clear();
+      _gridSelectedCell = null;
+      _gridFilled.clear();
+      _gridWrongCells.clear();
+      _gridWrongTries = 0;
       _locked = false;
       _wrongOptions.clear();
       _currentCounted = false;
@@ -1912,6 +1934,21 @@ class _GamePageState extends State<GamePage> {
             AppLogger.log('[TTS] speak error: $e');
           }
         }
+      } else if (_activeMode == GameMode.gBopoChainGrid) {
+        final q = await _withTimeout(
+          () => db.randomBopoChainGridPuzzle(level: widget.level),
+          seconds: 14,
+          label: 'qG',
+        );
+        if (!mounted) return;
+        setState(() {
+          _qG = q;
+          // 初始化棋盤：把 fixedCells 先填好
+          for (final k in q.fixedCells) {
+            final v = q.solution[k];
+            if (v != null) _gridFilled[k] = v;
+          }
+        });
       }
       if (mounted) setState(() => _questionLoading = false);
       AppLogger.log('[Q] next done mode=$_activeMode');
@@ -2550,6 +2587,198 @@ class _GamePageState extends State<GamePage> {
               ),
             ],
           ),
+        );
+      case GameMode.gBopoChainGrid:
+        final q = _qG;
+        if (q == null) return const Center(child: CircularProgressIndicator());
+
+        Color cellColor(int cell) {
+          if (!q.usedCells.contains(cell)) return Colors.white.withOpacity(0.35);
+          if (q.fixedCells.contains(cell)) return const Color(0xFF2E7D32); // green
+          final filled = _gridFilled[cell];
+          if (filled == null || filled.isEmpty) return const Color(0xFF00695C); // teal
+          final ans = q.solution[cell] ?? '';
+          if (filled == ans) return const Color(0xFF2E7D32);
+          return const Color(0xFFC62828);
+        }
+
+        String? cellText(int cell) {
+          if (!q.usedCells.contains(cell)) return null;
+          if (q.fixedCells.contains(cell)) return q.solution[cell];
+          return _gridFilled[cell];
+        }
+
+        void selectCell(int cell) {
+          if (_isFinished || _locked) return;
+          if (!q.puzzleCells.contains(cell)) return; // 只能選可填的格子
+          setState(() {
+            _gridSelectedCell = cell;
+            _currentTouched = true;
+          });
+        }
+
+        Future<void> showExplain() async {
+          await showDialog(
+            context: context,
+            builder: (ctx) => AlertDialog(
+              title: const Text('本關詞語'),
+              content: SizedBox(
+                width: double.maxFinite,
+                child: SingleChildScrollView(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: q.words.map((w) => Padding(padding: const EdgeInsets.only(bottom: 6), child: Text('• $w'))).toList(),
+                  ),
+                ),
+              ),
+              actions: [TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('關閉'))],
+            ),
+          );
+        }
+
+        void fillSelected(String syl) {
+          if (_isFinished || _locked) return;
+          final cell = _gridSelectedCell;
+          if (cell == null) {
+            setState(() => _feedback = '先點選要填的格子');
+            return;
+          }
+          if (!q.puzzleCells.contains(cell)) return;
+
+          final ans = q.solution[cell] ?? '';
+          final correct = syl == ans;
+          setState(() {
+            _gridFilled[cell] = syl;
+            if (correct) {
+              _gridWrongCells.remove(cell);
+            } else {
+              _gridWrongCells.add(cell);
+            }
+            _currentTouched = true;
+          });
+
+          if (!correct) {
+            _gridWrongTries += 1;
+            _mark(false, countAsQuestion: false);
+            return;
+          }
+
+          // 檢查是否全部完成
+          var allOk = true;
+          for (final k in q.puzzleCells) {
+            final v = _gridFilled[k];
+            if (v == null || v.isEmpty || v != (q.solution[k] ?? '')) {
+              allOk = false;
+              break;
+            }
+          }
+          if (allOk) {
+            setState(() => _locked = true);
+            _mark(true, firstTry: _gridWrongTries == 0, countAsQuestion: true);
+          }
+        }
+
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Row(
+              children: [
+                Text('注音接龍（第 ${_questions + 1} 關）', style: Theme.of(context).textTheme.titleMedium),
+                const Spacer(),
+                OutlinedButton.icon(
+                  onPressed: showExplain,
+                  icon: const Icon(Icons.menu_book_outlined, size: 18),
+                  label: const Text('查看解釋'),
+                ),
+              ],
+            ),
+            const SizedBox(height: 10),
+            Expanded(
+              child: LayoutBuilder(
+                builder: (ctx, c) {
+                  final size = (c.maxWidth / q.cols).floorToDouble();
+                  final fontSize = (size * 0.32).clamp(12.0, 18.0);
+                  return Center(
+                    child: SizedBox(
+                      width: size * q.cols,
+                      height: size * q.rows,
+                      child: GridView.builder(
+                        physics: const NeverScrollableScrollPhysics(),
+                        gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(crossAxisCount: q.cols),
+                        itemCount: q.rows * q.cols,
+                        itemBuilder: (ctx, i) {
+                          final selected = _gridSelectedCell == i;
+                          final used = q.usedCells.contains(i);
+                          final isPuzzle = q.puzzleCells.contains(i);
+                          final bg = cellColor(i);
+                          final text = cellText(i);
+                          return GestureDetector(
+                            onTap: isPuzzle ? () => selectCell(i) : null,
+                            child: Container(
+                              margin: const EdgeInsets.all(1.2),
+                              decoration: BoxDecoration(
+                                color: bg,
+                                borderRadius: BorderRadius.circular(6),
+                                border: Border.all(
+                                  color: selected ? Colors.amber : Colors.black12,
+                                  width: selected ? 2.4 : 1.0,
+                                ),
+                                boxShadow: [
+                                  if (used)
+                                    BoxShadow(
+                                      color: Colors.black.withOpacity(0.06),
+                                      blurRadius: 2,
+                                      offset: const Offset(0, 1),
+                                    ),
+                                ],
+                              ),
+                              child: Center(
+                                child: Text(
+                                  text ?? '',
+                                  textAlign: TextAlign.center,
+                                  style: TextStyle(
+                                    fontSize: fontSize,
+                                    fontWeight: FontWeight.w800,
+                                    color: used ? Colors.white : Colors.black26,
+                                  ),
+                                ),
+                              ),
+                            ),
+                          );
+                        },
+                      ),
+                    ),
+                  );
+                },
+              ),
+            ),
+            const SizedBox(height: 10),
+            const Text('可用注音（可重複使用）：', style: TextStyle(fontWeight: FontWeight.w700)),
+            const SizedBox(height: 8),
+            SingleChildScrollView(
+              child: Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                children: q.tiles.map((t) {
+                  return InkWell(
+                    onTap: (_locked || _isFinished) ? null : () => fillSelected(t),
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFF00695C),
+                        borderRadius: BorderRadius.circular(12),
+                        border: Border.all(color: Colors.white.withOpacity(0.22)),
+                      ),
+                      child: Text(
+                        t,
+                        style: const TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.w900),
+                      ),
+                    ),
+                  );
+                }).toList(),
+              ),
+            ),
+          ],
         );
       case GameMode.mix:
         // 不會走到這裡（mix 會在 _pickActiveMode 轉成實際題型）

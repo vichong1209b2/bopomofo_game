@@ -95,3 +95,30 @@ class WordChainQuestion {
     required this.options,
   });
 }
+
+/// 注音接龍（棋盤填空）：
+/// - 類似成語填字/接龍的棋盤玩法，但每個格子填的是「注音音節」（例如：ㄅㄚˊ）。
+/// - 下面提供可重複使用的注音方塊（不會像字母遊戲那樣被消耗）。
+/// - puzzleCells：棋盤中「需要玩家填」的格子索引
+/// - fixedCells：棋盤中「已給定」的格子索引（顯示答案，不能修改）
+class BopoChainGridPuzzle {
+  final int rows;
+  final int cols;
+  final Set<int> usedCells; // 這局有用到的格子
+  final Set<int> fixedCells;
+  final Set<int> puzzleCells;
+  final Map<int, String> solution; // cellIndex -> bopomofo syllable
+  final List<String> tiles; // 可點擊填入的注音方塊（可重複使用）
+  final List<String> words; // 用於「查看解釋」的詞語清單（按出題順序）
+
+  BopoChainGridPuzzle({
+    required this.rows,
+    required this.cols,
+    required this.usedCells,
+    required this.fixedCells,
+    required this.puzzleCells,
+    required this.solution,
+    required this.tiles,
+    required this.words,
+  });
+}

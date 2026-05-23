@@ -935,6 +935,262 @@ class DbService {
     );
   }
 
+  // ====== 題型 G：注音接龍（棋盤填空） ======
+
+  Future<BopoChainGridPuzzle> randomBopoChainGridPuzzle({
+    EducationLevel level = EducationLevel.elementaryAll,
+    int wordCount = 6,
+    int gridSize = 9,
+  }) async {
+    // 以「詞語注音」做接龍：上一個詞語最後一個音節 = 下一個詞語第一個音節
+    // 再把每個音節放進棋盤的格子，形成可交錯的路徑。
+
+    // 1) 先組出可用的詞語接龍序列（避免太長/太短）
+    final chain = await _buildBopoWordChain(level: level, wordCount: wordCount);
+
+    // 2) 把接龍放進固定棋盤模板（交錯 H/V/H/V...）
+    final placed = _placeChainOnGrid(chain, gridSize: gridSize);
+    if (placed == null) {
+      // 理論上不太會發生，但保底：重試一次
+      final chain2 = await _buildBopoWordChain(level: level, wordCount: wordCount);
+      final placed2 = _placeChainOnGrid(chain2, gridSize: gridSize);
+      if (placed2 == null) {
+        throw StateError('無法產生注音接龍棋盤（請重試）。');
+      }
+      return await _attachExtraTiles(placed2);
+    }
+    return await _attachExtraTiles(placed);
+  }
+
+  Future<BopoChainGridPuzzle> _attachExtraTiles(BopoChainGridPuzzle p) async {
+    final tileSet = p.tiles.toSet();
+    // 追加少量干擾音節（避免題目太像「只剩抄答案」）
+    final extra = await _db.rawQuery(r'''
+      SELECT DISTINCT bopomofo
+      FROM character_pronunciation
+      WHERE bopomofo != ''
+      ORDER BY RANDOM()
+      LIMIT 40
+    ''');
+    for (final r in extra) {
+      final b = (r['bopomofo'] as String?) ?? '';
+      if (b.isEmpty) continue;
+      tileSet.add(b);
+      if (tileSet.length >= 14) break;
+    }
+    final tiles = tileSet.toList()..shuffle(Random());
+    if (tiles.length > 14) tiles.removeRange(14, tiles.length);
+    return BopoChainGridPuzzle(
+      rows: p.rows,
+      cols: p.cols,
+      usedCells: p.usedCells,
+      fixedCells: p.fixedCells,
+      puzzleCells: p.puzzleCells,
+      solution: p.solution,
+      tiles: tiles,
+      words: p.words,
+    );
+  }
+
+  Future<List<({String word, List<String> syl})>> _buildBopoWordChain({
+    required EducationLevel level,
+    required int wordCount,
+  }) async {
+    // 限制字長，避免棋盤塞不下
+    const minLen = 2;
+    const maxLen = 4;
+
+    // 挑起始詞（有注音、常用、長度合理）
+    Future<({String word, String bopo})?> pickStart() async {
+      for (final cand in _wordLevelWhereCandidates(level, alias: 'w')) {
+        final rows = await _db.rawQuery(r'''
+          SELECT w.word AS w, w.bopomofo AS b
+          FROM word w
+          WHERE ''' +
+            cand.where +
+            r'''
+            AND w.is_common = 1
+            AND w.bopomofo != ''
+            AND length(w.word) BETWEEN ? AND ?
+          ORDER BY RANDOM()
+          LIMIT 20
+        ''', [...cand.args, minLen, maxLen]);
+        if (rows.isEmpty) continue;
+        for (final r in rows) {
+          final w = (r['w'] as String?) ?? '';
+          final b = (r['b'] as String?) ?? '';
+          if (w.isEmpty || b.isEmpty) continue;
+          return (word: w, bopo: b);
+        }
+      }
+      return null;
+    }
+
+    Future<List<({String word, String bopo})>> pickNext(String firstSyl, Set<String> excludeWords) async {
+      final out = <({String word, String bopo})>[];
+      // 用 LIKE 先縮小範圍（以「音節 + 空格」或「音節 + 結尾」開頭）
+      final like1 = '$firstSyl %';
+      final like2 = '$firstSyl%';
+      for (final cand in _wordLevelWhereCandidates(level, alias: 'w')) {
+        final rows = await _db.rawQuery(r'''
+          SELECT w.word AS w, w.bopomofo AS b
+          FROM word w
+          WHERE ''' +
+            cand.where +
+            r'''
+            AND w.is_common = 1
+            AND w.bopomofo != ''
+            AND length(w.word) BETWEEN ? AND ?
+            AND (w.bopomofo LIKE ? OR w.bopomofo LIKE ?)
+          ORDER BY RANDOM()
+          LIMIT 40
+        ''', [...cand.args, minLen, maxLen, like1, like2]);
+        for (final r in rows) {
+          final w = (r['w'] as String?) ?? '';
+          final b = (r['b'] as String?) ?? '';
+          if (w.isEmpty || b.isEmpty) continue;
+          if (excludeWords.contains(w)) continue;
+          final syl = _syllables(b);
+          if (syl.isEmpty) continue;
+          if (syl.first != firstSyl) continue; // 確保真的是「第一個音節」
+          out.add((word: w, bopo: b));
+          if (out.length >= 20) break;
+        }
+        if (out.isNotEmpty) break;
+      }
+      out.shuffle(Random());
+      return out;
+    }
+
+    for (var attempt = 0; attempt < 30; attempt++) {
+      final start = await pickStart();
+      if (start == null) continue;
+      final chain = <({String word, List<String> syl})>[];
+      final usedWords = <String>{};
+
+      final s0 = _syllables(start.bopo);
+      if (s0.length < minLen || s0.length > maxLen) continue;
+      chain.add((word: start.word, syl: s0));
+      usedWords.add(start.word);
+
+      var ok = true;
+      while (chain.length < wordCount) {
+        final lastSyl = chain.last.syl.last;
+        final nexts = await pickNext(lastSyl, usedWords);
+        if (nexts.isEmpty) {
+          ok = false;
+          break;
+        }
+        final n = nexts.first;
+        final sn = _syllables(n.bopo);
+        if (sn.length < minLen || sn.length > maxLen) continue;
+        chain.add((word: n.word, syl: sn));
+        usedWords.add(n.word);
+      }
+      if (ok && chain.length == wordCount) return chain;
+    }
+    throw StateError('找不到可用的注音接龍題目（請換等級或再試一次）。');
+  }
+
+  BopoChainGridPuzzle? _placeChainOnGrid(
+    List<({String word, List<String> syl})> chain, {
+    required int gridSize,
+  }) {
+    final rows = gridSize;
+    final cols = gridSize;
+    int idx(int r, int c) => r * cols + c;
+
+    // 交錯放置：H→V→H→V...
+    var r0 = (rows / 2).floor();
+    var c0 = 2;
+    var horizontal = true;
+    var dir = 1; // H: +1 往右, -1 往左
+
+    final sol = <int, String>{};
+    final used = <int>{};
+
+    bool placeWord(List<String> syl, {required int sr, required int sc, required bool h, required int dir}) {
+      for (var i = 0; i < syl.length; i++) {
+        final r = sr + (h ? 0 : i);
+        final c = sc + (h ? dir * i : 0);
+        if (r < 0 || r >= rows || c < 0 || c >= cols) return false;
+        final k = idx(r, c);
+        final v = syl[i];
+        if (sol.containsKey(k) && sol[k] != v) return false;
+        sol[k] = v;
+        used.add(k);
+      }
+      return true;
+    }
+
+    // 放第一個詞
+    if (!placeWord(chain.first.syl, sr: r0, sc: c0, h: true, dir: dir)) return null;
+    var endR = r0;
+    var endC = c0 + dir * (chain.first.syl.length - 1);
+
+    for (var wi = 1; wi < chain.length; wi++) {
+      horizontal = !horizontal;
+      if (horizontal) dir = -dir; // 每次水平換方向，避免一直往同一側衝
+      final syl = chain[wi].syl;
+      final ok = placeWord(syl, sr: endR, sc: endC, h: horizontal, dir: dir);
+      if (!ok) return null;
+      if (horizontal) {
+        endC = endC + dir * (syl.length - 1);
+      } else {
+        endR = endR + (syl.length - 1);
+      }
+    }
+
+    // 固定一些提示格：每個詞的第一格（也就是接點）+ 第一個詞的第一格
+    final fixed = <int>{};
+    // 重算每個詞的起點並收集固定格
+    r0 = (rows / 2).floor();
+    c0 = 2;
+    horizontal = true;
+    dir = 1;
+    fixed.add(idx(r0, c0));
+    endR = r0;
+    endC = c0 + dir * (chain.first.syl.length - 1);
+    fixed.add(idx(endR, endC)); // 第一個詞的尾端（也是接點）
+
+    for (var wi = 1; wi < chain.length; wi++) {
+      horizontal = !horizontal;
+      if (horizontal) dir = -dir;
+      fixed.add(idx(endR, endC)); // 每個新詞的起點（接點）
+      final syl = chain[wi].syl;
+      if (horizontal) {
+        endC = endC + dir * (syl.length - 1);
+      } else {
+        endR = endR + (syl.length - 1);
+      }
+      fixed.add(idx(endR, endC)); // 每個詞的尾端也給一點提示，避免太難
+    }
+
+    // puzzleCells = used - fixed
+    final puzzleCells = used.difference(fixed);
+
+    // tiles：把所有需要填的音節放進來（再加 2 個干擾）
+    final tileSet = <String>{};
+    for (final k in used) {
+      final v = sol[k];
+      if (v != null) tileSet.add(v);
+    }
+    final tiles = tileSet.toList();
+    tiles.shuffle(Random());
+    if (tiles.length > 14) tiles.removeRange(14, tiles.length);
+
+    return BopoChainGridPuzzle(
+      rows: rows,
+      cols: cols,
+      usedCells: used,
+      fixedCells: fixed,
+      puzzleCells: puzzleCells,
+      solution: sol,
+      tiles: tiles,
+      words: chain.map((e) => e.word).toList(growable: false),
+    );
+  }
+
   // ====== helpers ======
 
   static const _toneMarks = ['˙', 'ˊ', 'ˇ', 'ˋ'];
