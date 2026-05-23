@@ -359,6 +359,7 @@ class GameSettings {
   final ThemeStyle themeStyle;
   final bool soundEnabled; // 答對/答錯音效（不含 TTS）
   // TTS（文字轉語音）設定：某些手機（如部分 realme/OPPO）需要指定 voice 才有聲音/不會卡住初始化。
+  final String? ttsEngine; // Android TTS engine package，例如 com.google.android.tts
   final String? ttsVoiceName;
   final String? ttsVoiceLocale;
 
@@ -370,6 +371,7 @@ class GameSettings {
     required this.level,
     required this.themeStyle,
     required this.soundEnabled,
+    this.ttsEngine,
     this.ttsVoiceName,
     this.ttsVoiceLocale,
   });
@@ -382,6 +384,7 @@ class GameSettings {
     EducationLevel? level,
     ThemeStyle? themeStyle,
     bool? soundEnabled,
+    String? ttsEngine,
     String? ttsVoiceName,
     String? ttsVoiceLocale,
   }) {
@@ -393,6 +396,7 @@ class GameSettings {
       level: level ?? this.level,
       themeStyle: themeStyle ?? this.themeStyle,
       soundEnabled: soundEnabled ?? this.soundEnabled,
+      ttsEngine: ttsEngine ?? this.ttsEngine,
       ttsVoiceName: ttsVoiceName ?? this.ttsVoiceName,
       ttsVoiceLocale: ttsVoiceLocale ?? this.ttsVoiceLocale,
     );
@@ -563,8 +567,9 @@ class _HomePageState extends State<HomePage> {
                     level: _settings.level,
                     themeStyle: _settings.themeStyle,
                     soundEnabled: _settings.soundEnabled,
-                  ttsVoiceName: _settings.ttsVoiceName,
-                  ttsVoiceLocale: _settings.ttsVoiceLocale,
+                    ttsEngine: _settings.ttsEngine,
+                    ttsVoiceName: _settings.ttsVoiceName,
+                    ttsVoiceLocale: _settings.ttsVoiceLocale,
                   ),
                 ));
               },
@@ -595,10 +600,14 @@ class _SettingsPageState extends State<SettingsPage> {
   late EducationLevel _level = widget.initial.level;
   late ThemeStyle _themeStyle = widget.initial.themeStyle;
   late bool _soundEnabled = widget.initial.soundEnabled;
+  late String? _ttsEngine = widget.initial.ttsEngine;
   late String? _ttsVoiceName = widget.initial.ttsVoiceName;
   late String? _ttsVoiceLocale = widget.initial.ttsVoiceLocale;
 
   final FlutterTts _settingsTts = FlutterTts();
+  bool _enginesLoading = false;
+  String? _enginesError;
+  List<String> _engines = const [];
   bool _voicesLoading = false;
   String? _voicesError;
   List<({String name, String locale})> _zhVoices = const [];
@@ -606,13 +615,53 @@ class _SettingsPageState extends State<SettingsPage> {
   @override
   void initState() {
     super.initState();
-    _loadVoices();
+    _loadEnginesThenVoices();
   }
 
   @override
   void dispose() {
     _settingsTts.stop();
     super.dispose();
+  }
+
+  String _engineLabel(String id) {
+    if (id == 'com.google.android.tts') return 'Google 語音辨識及合成';
+    // 其他引擎多半是廠牌/系統自帶，直接顯示 package id 方便辨識
+    return id;
+  }
+
+  Future<void> _loadEnginesThenVoices() async {
+    setState(() {
+      _enginesLoading = true;
+      _enginesError = null;
+    });
+    try {
+      final r = await _settingsTts.getEngines;
+      final engines = <String>[];
+      if (r is List) {
+        for (final e in r) {
+          final s = e.toString();
+          if (s.isNotEmpty) engines.add(s);
+        }
+      }
+      if (!mounted) return;
+      setState(() => _engines = engines);
+      // 若使用者已選引擎，先套用後再讀 voice，否則讀目前系統預設 engine 的 voice
+      if (_ttsEngine != null && _ttsEngine!.isNotEmpty) {
+        try {
+          await _settingsTts.setEngine(_ttsEngine!);
+        } catch (_) {
+          // ignore
+        }
+      }
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _enginesError = e.toString());
+    } finally {
+      if (!mounted) return;
+      setState(() => _enginesLoading = false);
+    }
+    await _loadVoices();
   }
 
   Future<void> _loadVoices() async {
@@ -741,6 +790,7 @@ class _SettingsPageState extends State<SettingsPage> {
       level: _level,
       themeStyle: _themeStyle,
       soundEnabled: _soundEnabled,
+      ttsEngine: _ttsEngine,
       ttsVoiceName: _ttsVoiceName,
       ttsVoiceLocale: _ttsVoiceLocale,
     ));
@@ -812,6 +862,43 @@ class _SettingsPageState extends State<SettingsPage> {
           const SizedBox(height: 20),
           const Text('語音（TTS）', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w600)),
           const SizedBox(height: 8),
+          if (_enginesLoading)
+            const ListTile(
+              leading: SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2)),
+              title: Text('正在讀取語音引擎...'),
+            )
+          else if (_enginesError != null)
+            ListTile(
+              title: const Text('讀取語音引擎失敗'),
+              subtitle: Text(_enginesError!, style: const TextStyle(color: Colors.black54)),
+              trailing: OutlinedButton(onPressed: _loadEnginesThenVoices, child: const Text('重試')),
+            )
+          else
+            DropdownButtonFormField<String>(
+              value: (_ttsEngine == null || _ttsEngine!.isEmpty) ? 'auto' : _ttsEngine!,
+              items: [
+                const DropdownMenuItem(value: 'auto', child: Text('自動（跟隨系統預設引擎）')),
+                ..._engines.map((e) => DropdownMenuItem(value: e, child: Text(_engineLabel(e), overflow: TextOverflow.ellipsis))),
+              ],
+              onChanged: (val) async {
+                if (val == null) return;
+                if (val == 'auto') {
+                  setState(() => _ttsEngine = null);
+                  await _loadVoices(); // 讀取系統預設引擎 voice
+                  return;
+                }
+                setState(() => _ttsEngine = val);
+                // 立刻切換引擎並重讀 voice，讓使用者看到差異（例如裝了 Google Speech Services 後）
+                try {
+                  await _settingsTts.setEngine(val);
+                } catch (_) {}
+                await _loadVoices();
+              },
+              decoration: const InputDecoration(
+                border: OutlineInputBorder(),
+                helperText: '中國版手機常見「系統預設引擎」不含完整中文語音；若已安裝 Google 語音服務，可在此指定。',
+              ),
+            ),
           if (_voicesLoading)
             const ListTile(
               leading: SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2)),
@@ -849,8 +936,19 @@ class _SettingsPageState extends State<SettingsPage> {
                   _ttsVoiceName = parts[1];
                 });
               },
-              decoration: const InputDecoration(border: OutlineInputBorder(), helperText: '若某些手機進遊戲一直轉圈圈/無朗讀，可嘗試手動指定語音。'),
+              decoration: const InputDecoration(
+                border: OutlineInputBorder(),
+                helperText: '如果語音播不出來，可先選「引擎」，再選 voice；改完建議完全關閉 App 重開一次。',
+              ),
             ),
+          Align(
+            alignment: Alignment.centerRight,
+            child: TextButton.icon(
+              onPressed: _voicesLoading ? null : _loadVoices,
+              icon: const Icon(Icons.refresh, size: 18),
+              label: const Text('重新載入 voice'),
+            ),
+          ),
           const SizedBox(height: 6),
           const Text(
             '提示：若仍無聲音，請到 Android 系統設定 →「文字轉語音(TTS)」下載中文語音/切換引擎。',
@@ -963,6 +1061,7 @@ class GamePage extends StatefulWidget {
     required this.level,
     required this.themeStyle,
     required this.soundEnabled,
+    this.ttsEngine,
     this.ttsVoiceName,
     this.ttsVoiceLocale,
   });
@@ -973,6 +1072,7 @@ class GamePage extends StatefulWidget {
   final EducationLevel level;
   final ThemeStyle themeStyle;
   final bool soundEnabled;
+  final String? ttsEngine;
   final String? ttsVoiceName;
   final String? ttsVoiceLocale;
 
@@ -1048,12 +1148,15 @@ class _GamePageState extends State<GamePage> {
 
       // TTS 初始化如果失敗，不應該導致整個遊戲卡在 loading。
       try {
-        _ttsReady = await _setupTts();
+        AppLogger.log('[TTS] setup start');
+        _ttsReady = await _withTimeout(() => _setupTts(), seconds: 8, label: 'tts_setup');
+        AppLogger.log('[TTS] setup done ready=$_ttsReady lang=$_ttsLang engine=${widget.ttsEngine ?? "auto"}');
       } catch (e) {
         _ttsReady = false;
         if (mounted) {
           setState(() => _feedback = '語音初始化失敗（仍可遊玩非朗讀題型）：$e');
         }
+        AppLogger.log('[TTS] setup failed: $e');
       }
 
       if (widget.playMode == PlayMode.survival) {
@@ -1096,6 +1199,26 @@ class _GamePageState extends State<GamePage> {
   bool get _canUseAudioHintUnlimited => !_isFinished && _ttsReady;
 
   Future<bool> _setupTts() async {
+    // 1) 引擎選擇
+    try {
+      final eng = await _tts.getEngines;
+      final engines = (eng is List) ? eng.map((e) => e.toString()).where((s) => s.isNotEmpty).toList() : <String>[];
+      // 若使用者指定 engine，優先；否則如果裝了 Google TTS，預設優先用它（特別適用於中國版手機裝了 Speech Services by Google 後）。
+      final want = (widget.ttsEngine != null && widget.ttsEngine!.isNotEmpty)
+          ? widget.ttsEngine!
+          : (engines.contains('com.google.android.tts') ? 'com.google.android.tts' : null);
+      if (want != null) {
+        try {
+          await _tts.setEngine(want);
+          AppLogger.log('[TTS] engine=$want');
+        } catch (e) {
+          AppLogger.log('[TTS] setEngine fail ($want): $e');
+        }
+      }
+    } catch (_) {
+      // ignore
+    }
+
     // 若使用者指定了 voice，優先使用（可改善部分機型的中文朗讀/初始化問題）
     if (widget.ttsVoiceName != null && widget.ttsVoiceLocale != null) {
       try {
@@ -1105,10 +1228,9 @@ class _GamePageState extends State<GamePage> {
         await _tts.setSpeechRate(0.40);
         await _tts.setPitch(1.05);
         await _tts.setVolume(1.0);
-        await _tts.awaitSpeakCompletion(true);
+        // 避免部分機型 awaitSpeakCompletion/speak 造成卡住：不等待 completion，讓遊戲先可玩
         try {
-          await _tts.speak(' ');
-          await _tts.stop();
+          await _tts.awaitSpeakCompletion(false);
         } catch (_) {}
         return true;
       } catch (_) {
@@ -1160,16 +1282,10 @@ class _GamePageState extends State<GamePage> {
     await _tts.setSpeechRate(0.40);
     await _tts.setPitch(1.05);
     await _tts.setVolume(1.0);
-    // 盡量等朗讀完成（避免連續點擊時互相蓋掉）
-    await _tts.awaitSpeakCompletion(true);
-
-    // 某些機型會在第一次 speak 才真正初始化音源；用很短的測試避免「第一次點沒聲音」
+    // 避免部分機型 awaitSpeakCompletion/speak 造成卡住：不等待 completion，讓遊戲先可玩
     try {
-      await _tts.speak(' ');
-      await _tts.stop();
-    } catch (_) {
-      // ignore
-    }
+      await _tts.awaitSpeakCompletion(false);
+    } catch (_) {}
 
     return true;
   }
@@ -1189,6 +1305,9 @@ class _GamePageState extends State<GamePage> {
     if (consume) {
       setState(() => _audioHintsLeft -= 1);
     }
+    try {
+      await _tts.stop();
+    } catch (_) {}
     await _tts.speak(text);
   }
 
@@ -1448,6 +1567,7 @@ class _GamePageState extends State<GamePage> {
                     level: widget.level,
                     themeStyle: widget.themeStyle,
                     soundEnabled: widget.soundEnabled,
+                    ttsEngine: widget.ttsEngine,
                     ttsVoiceName: widget.ttsVoiceName,
                     ttsVoiceLocale: widget.ttsVoiceLocale,
                   ),
