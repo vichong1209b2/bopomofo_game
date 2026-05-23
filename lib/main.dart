@@ -458,10 +458,18 @@ class GameSettings {
     // 若任何欄位解析失敗，直接回退到 defaults（避免讀到壞資料導致 App 無法開啟）。
     try {
       if (m is! Map) return GameSettings.defaults();
+      String _normEnumName(String? s) {
+        if (s == null) return '';
+        final t = s.trim();
+        if (t.isEmpty) return '';
+        // 相容舊格式：可能存成 "ThemeStyle.kuromi" / "EducationLevel.juniorHigh"
+        return t.contains('.') ? t.split('.').last : t;
+      }
+
       T enumByName<T>(List<T> values, String? name) {
         if (name == null || name.isEmpty) throw Exception('missing enum name');
         // ignore: avoid_dynamic_calls
-        return (values as dynamic).byName(name) as T;
+        return (values as dynamic).byName(_normEnumName(name)) as T;
       }
 
       final playMode = enumByName(PlayMode.values, m['playMode']?.toString());
@@ -583,6 +591,10 @@ class _HomePageState extends State<HomePage> {
       AppLogger.log('[Prefs] load settings: error -> defaults');
       _settings = GameSettings.defaults();
     }
+    AppLogger.log(
+      '[Prefs] loaded settings: mode=${_settings.mode} level=${_settings.level} theme=${_settings.themeStyle} '
+      'ttsEngine=${_settings.ttsEngine ?? "auto"} voice=${_settings.ttsVoiceLocale ?? "auto"}|${_settings.ttsVoiceName ?? ""}',
+    );
     if (!mounted) return;
     setState(() => _settingsLoaded = true);
   }
@@ -592,8 +604,12 @@ class _HomePageState extends State<HomePage> {
     if (mounted) setState(() {});
     try {
       final sp = await SharedPreferences.getInstance();
-      await sp.setString(_prefsKeySettings, jsonEncode(s.toMap()));
-      AppLogger.log('[Prefs] save settings: ok');
+      final raw = jsonEncode(s.toMap());
+      await sp.setString(_prefsKeySettings, raw);
+      AppLogger.log(
+        '[Prefs] save settings: ok (${raw.length} chars) mode=${s.mode} level=${s.level} theme=${s.themeStyle} '
+        'ttsEngine=${s.ttsEngine ?? "auto"} voice=${s.ttsVoiceLocale ?? "auto"}|${s.ttsVoiceName ?? ""}',
+      );
     } catch (_) {
       AppLogger.log('[Prefs] save settings: error');
     }
@@ -686,6 +702,10 @@ class _HomePageState extends State<HomePage> {
             FilledButton(
               onPressed: _settingsLoaded
                   ? () {
+                      AppLogger.log(
+                        '[Prefs] start game: mode=${_settings.mode} level=${_settings.level} theme=${_settings.themeStyle} '
+                        'ttsEngine=${_settings.ttsEngine ?? "auto"} voice=${_settings.ttsVoiceLocale ?? "auto"}|${_settings.ttsVoiceName ?? ""}',
+                      );
                 Navigator.of(context).push(MaterialPageRoute(
                   builder: (_) => GamePage(
                     mode: _settings.mode,
