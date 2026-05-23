@@ -1,7 +1,9 @@
 import 'dart:async';
+import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_tts/flutter_tts.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import 'db/db_service.dart';
 import 'debug/app_logger.dart';
@@ -319,6 +321,24 @@ class GameGoal {
       lives: lives ?? this.lives,
     );
   }
+
+  Map<String, dynamic> toMap() => {
+        'targetScore': targetScore,
+        'targetCorrect': targetCorrect,
+        'timeLimitSec': timeLimitSec,
+        'lives': lives,
+      };
+
+  static GameGoal fromMap(dynamic m) {
+    if (m is! Map) return const GameGoal();
+    int? asInt(dynamic v) => v == null ? null : (v is int ? v : int.tryParse(v.toString()));
+    return GameGoal(
+      targetScore: asInt(m['targetScore']),
+      targetCorrect: asInt(m['targetCorrect']),
+      timeLimitSec: asInt(m['timeLimitSec']),
+      lives: asInt(m['lives']),
+    );
+  }
 }
 
 GameGoal defaultGoalFor(PlayMode mode) {
@@ -401,6 +421,83 @@ class GameSettings {
       ttsVoiceLocale: ttsVoiceLocale ?? this.ttsVoiceLocale,
     );
   }
+
+  /// 預設值集中管理，方便「恢復預設」與版本升級時套用。
+  static GameSettings defaults() {
+    return GameSettings(
+      // 預設用較輕量的題型，避免第一次進入就跑接龍的大查詢造成「看起來卡住」。
+      // 接龍題型仍可在設定頁手動切換。
+      mode: GameMode.aAudioToChar,
+      flavor: DataFlavor.enhanced,
+      playMode: PlayMode.scoreTarget,
+      goal: defaultGoalFor(PlayMode.scoreTarget),
+      level: EducationLevel.juniorHigh,
+      themeStyle: ThemeStyle.sakura,
+      soundEnabled: true,
+      // TTS：預設跟隨系統（auto）
+      ttsEngine: null,
+      ttsVoiceName: null,
+      ttsVoiceLocale: null,
+    );
+  }
+
+  Map<String, dynamic> toMap() => {
+        'mode': mode.name,
+        'flavor': flavor.name,
+        'playMode': playMode.name,
+        'goal': goal.toMap(),
+        'level': level.name,
+        'themeStyle': themeStyle.name,
+        'soundEnabled': soundEnabled,
+        'ttsEngine': ttsEngine,
+        'ttsVoiceName': ttsVoiceName,
+        'ttsVoiceLocale': ttsVoiceLocale,
+      };
+
+  static GameSettings fromMap(dynamic m) {
+    // 若任何欄位解析失敗，直接回退到 defaults（避免讀到壞資料導致 App 無法開啟）。
+    try {
+      if (m is! Map) return GameSettings.defaults();
+      T enumByName<T>(List<T> values, String? name) {
+        if (name == null || name.isEmpty) throw Exception('missing enum name');
+        // ignore: avoid_dynamic_calls
+        return (values as dynamic).byName(name) as T;
+      }
+
+      final playMode = enumByName(PlayMode.values, m['playMode']?.toString());
+      final goal = GameGoal.fromMap(m['goal']);
+
+      // 若 goal 解析不到任何值，依 playMode 回退到預設 goal（避免目標顯示為空）。
+      final effectiveGoal = (goal.targetScore == null &&
+              goal.targetCorrect == null &&
+              goal.timeLimitSec == null &&
+              goal.lives == null)
+          ? defaultGoalFor(playMode)
+          : goal;
+
+      String? optStr(dynamic v) {
+        final s = v?.toString();
+        if (s == null) return null;
+        final t = s.trim();
+        return t.isEmpty ? null : t;
+      }
+
+      return GameSettings(
+        mode: enumByName(GameMode.values, m['mode']?.toString()),
+        flavor: enumByName(DataFlavor.values, m['flavor']?.toString()),
+        playMode: playMode,
+        goal: effectiveGoal,
+        level: enumByName(EducationLevel.values, m['level']?.toString()),
+        themeStyle: enumByName(ThemeStyle.values, m['themeStyle']?.toString()),
+        soundEnabled: (m['soundEnabled'] == true),
+        ttsEngine: optStr(m['ttsEngine']),
+        ttsVoiceName: optStr(m['ttsVoiceName']),
+        ttsVoiceLocale: optStr(m['ttsVoiceLocale']),
+      );
+    } catch (_) {
+      return GameSettings.defaults();
+    }
+  }
 }
 
 String modeLabel(GameMode m) {
@@ -460,24 +557,50 @@ class HomePage extends StatefulWidget {
 }
 
 class _HomePageState extends State<HomePage> {
-  GameSettings _settings = GameSettings(
-    // 預設用較輕量的題型，避免第一次進入就跑接龍的大查詢造成「看起來卡住」。
-    // 接龍題型仍可在設定頁手動切換。
-    mode: GameMode.aAudioToChar,
-    flavor: DataFlavor.enhanced,
-    playMode: PlayMode.scoreTarget,
-    goal: defaultGoalFor(PlayMode.scoreTarget),
-    level: EducationLevel.juniorHigh,
-    themeStyle: ThemeStyle.sakura,
-    soundEnabled: true,
-  );
+  static const _prefsKeySettings = 'bopomofo_game_settings_v1';
+
+  GameSettings _settings = GameSettings.defaults();
+  bool _settingsLoaded = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadSettings();
+  }
+
+  Future<void> _loadSettings() async {
+    try {
+      final sp = await SharedPreferences.getInstance();
+      final raw = sp.getString(_prefsKeySettings);
+      if (raw != null && raw.trim().isNotEmpty) {
+        _settings = GameSettings.fromMap(jsonDecode(raw));
+      } else {
+        _settings = GameSettings.defaults();
+      }
+    } catch (_) {
+      _settings = GameSettings.defaults();
+    }
+    if (!mounted) return;
+    setState(() => _settingsLoaded = true);
+  }
+
+  Future<void> _saveSettings(GameSettings s) async {
+    _settings = s;
+    if (mounted) setState(() {});
+    try {
+      final sp = await SharedPreferences.getInstance();
+      await sp.setString(_prefsKeySettings, jsonEncode(s.toMap()));
+    } catch (_) {
+      // ignore
+    }
+  }
 
   Future<void> _openSettings() async {
     final result = await Navigator.of(context).push<GameSettings>(
       MaterialPageRoute(builder: (_) => SettingsPage(initial: _settings)),
     );
     if (result != null) {
-      setState(() => _settings = result);
+      await _saveSettings(result);
     }
   }
 
@@ -557,7 +680,8 @@ class _HomePageState extends State<HomePage> {
             ),
             const Spacer(),
             FilledButton(
-              onPressed: () {
+              onPressed: _settingsLoaded
+                  ? () {
                 Navigator.of(context).push(MaterialPageRoute(
                   builder: (_) => GamePage(
                     mode: _settings.mode,
@@ -572,7 +696,8 @@ class _HomePageState extends State<HomePage> {
                     ttsVoiceLocale: _settings.ttsVoiceLocale,
                   ),
                 ));
-              },
+              }
+                  : null,
               child: const Text('開始'),
             ),
           ],
@@ -827,12 +952,46 @@ class _SettingsPageState extends State<SettingsPage> {
     ));
   }
 
+  Future<void> _resetToDefaults() async {
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('恢復預設設定'),
+        content: const Text('會把題型/等級/主題/TTS 引擎與 voice 等全部回到預設值。確定要恢復嗎？'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('取消')),
+          FilledButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('恢復')),
+        ],
+      ),
+    );
+    if (ok != true) return;
+    final d = GameSettings.defaults();
+    setState(() {
+      _mode = d.mode;
+      _flavor = d.flavor;
+      _playMode = d.playMode;
+      _goal = d.goal;
+      _level = d.level;
+      _themeStyle = d.themeStyle;
+      _soundEnabled = d.soundEnabled;
+      _ttsEngine = d.ttsEngine;
+      _ttsVoiceName = d.ttsVoiceName;
+      _ttsVoiceLocale = d.ttsVoiceLocale;
+
+      _forceGoogleEngine = false;
+      _engineBeforeForce = null;
+    });
+    // 重設後同步刷新 voice 清單（用系統預設引擎）
+    await _loadEnginesThenVoices();
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
         title: const Text('設定'),
         actions: [
+          TextButton(onPressed: _resetToDefaults, child: const Text('預設')),
           TextButton(onPressed: _save, child: const Text('儲存')),
         ],
       ),
@@ -2209,11 +2368,13 @@ class ThemedBackground extends StatelessWidget {
             child: IgnorePointer(
               child: Center(
                 child: Opacity(
-                  opacity: 0.10,
+                  // 之前為了避免「題目看不到」把透明度壓太低，角色不明顯。
+                  // 目前改成更容易辨識但仍不會遮擋文字的強度。
+                  opacity: 0.18,
                   child: Image.asset(
                     spec.heroAsset!,
-                    width: 520,
-                    height: 520,
+                    width: 560,
+                    height: 560,
                     fit: BoxFit.contain,
                     errorBuilder: (ctx, err, st) => const SizedBox.shrink(),
                   ),
@@ -2226,7 +2387,7 @@ class ThemedBackground extends StatelessWidget {
           top: 18,
           right: 10,
           child: Opacity(
-            opacity: 0.22,
+            opacity: 0.28,
             child: spec.decoTopAsset != null
                 ? Image.asset(
                     spec.decoTopAsset!,
@@ -2242,7 +2403,7 @@ class ThemedBackground extends StatelessWidget {
           bottom: 10,
           left: 10,
           child: Opacity(
-            opacity: 0.18,
+            opacity: 0.24,
             child: spec.decoBottomAsset != null
                 ? Image.asset(
                     spec.decoBottomAsset!,
@@ -2260,7 +2421,7 @@ class ThemedBackground extends StatelessWidget {
             top: 86,
             left: 14,
             child: Opacity(
-              opacity: 0.10,
+              opacity: 0.12,
               child: Image.asset(
                 spec.badgeAsset!,
                 width: 110,
@@ -2275,7 +2436,7 @@ class ThemedBackground extends StatelessWidget {
             bottom: 110,
             right: 18,
             child: Opacity(
-              opacity: 0.08,
+              opacity: 0.10,
               child: Image.asset(
                 spec.badgeAsset!,
                 width: 120,
