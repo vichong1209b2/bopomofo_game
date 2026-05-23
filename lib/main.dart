@@ -573,11 +573,14 @@ class _HomePageState extends State<HomePage> {
       final sp = await SharedPreferences.getInstance();
       final raw = sp.getString(_prefsKeySettings);
       if (raw != null && raw.trim().isNotEmpty) {
+        AppLogger.log('[Prefs] load settings: found (${raw.length} chars)');
         _settings = GameSettings.fromMap(jsonDecode(raw));
       } else {
+        AppLogger.log('[Prefs] load settings: not found -> defaults');
         _settings = GameSettings.defaults();
       }
     } catch (_) {
+      AppLogger.log('[Prefs] load settings: error -> defaults');
       _settings = GameSettings.defaults();
     }
     if (!mounted) return;
@@ -590,8 +593,9 @@ class _HomePageState extends State<HomePage> {
     try {
       final sp = await SharedPreferences.getInstance();
       await sp.setString(_prefsKeySettings, jsonEncode(s.toMap()));
+      AppLogger.log('[Prefs] save settings: ok');
     } catch (_) {
-      // ignore
+      AppLogger.log('[Prefs] save settings: error');
     }
   }
 
@@ -738,6 +742,7 @@ class _SettingsPageState extends State<SettingsPage> {
   List<({String name, String locale})> _zhVoices = const [];
   bool _forceGoogleEngine = false;
   String? _engineBeforeForce;
+  bool _popping = false;
 
   @override
   void initState() {
@@ -937,8 +942,10 @@ class _SettingsPageState extends State<SettingsPage> {
     setState(() => _goal = g);
   }
 
-  void _save() {
-    Navigator.of(context).pop(GameSettings(
+  void _popWithSave() {
+    if (_popping) return;
+    _popping = true;
+    final s = GameSettings(
       mode: _mode,
       flavor: _flavor,
       playMode: _playMode,
@@ -949,7 +956,11 @@ class _SettingsPageState extends State<SettingsPage> {
       ttsEngine: _ttsEngine,
       ttsVoiceName: _ttsVoiceName,
       ttsVoiceLocale: _ttsVoiceLocale,
-    ));
+    );
+    AppLogger.log(
+      '[Prefs] leaving SettingsPage (mode=${s.mode} level=${s.level} theme=${s.themeStyle} ttsEngine=${s.ttsEngine ?? "auto"} voice=${s.ttsVoiceLocale ?? "auto"}|${s.ttsVoiceName ?? ""})',
+    );
+    Navigator.of(context).pop(s);
   }
 
   Future<void> _resetToDefaults() async {
@@ -987,32 +998,33 @@ class _SettingsPageState extends State<SettingsPage> {
 
   @override
   Widget build(BuildContext context) {
-    // 重要：使用者常用左上角返回鍵或 Android 系統返回來離開設定頁。
-    // 若不攔截，Navigator.pop() 會回傳 null，導致主頁不會保存本次修改，看起來像「設定不會記憶」。
-    return WillPopScope(
-      onWillPop: () async {
-        _save();
-        return false;
+    // 重要：使用者常用 Android 系統返回鍵離開設定頁；若不處理，主頁拿不到 result，就不會保存。
+    // 這裡用 PopScope（Flutter 3.44）攔截返回並帶上結果。
+    return PopScope(
+      canPop: false,
+      onPopInvoked: (didPop) {
+        if (didPop) return;
+        _popWithSave();
       },
       child: Scaffold(
         appBar: AppBar(
           title: const Text('設定'),
           leading: IconButton(
             icon: const Icon(Icons.arrow_back),
-            onPressed: _save,
+            onPressed: _popWithSave,
             tooltip: '返回（並儲存）',
           ),
           actions: [
             TextButton(onPressed: _resetToDefaults, child: const Text('預設')),
-            TextButton(onPressed: _save, child: const Text('儲存')),
+            TextButton(onPressed: _popWithSave, child: const Text('儲存')),
           ],
         ),
         body: Container(
           child: ThemedBackground(
             themeStyle: _themeStyle,
             child: ListView(
-          padding: const EdgeInsets.all(16),
-          children: [
+              padding: const EdgeInsets.all(16),
+              children: [
           const Text('等級', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w600)),
           const SizedBox(height: 8),
           DropdownButtonFormField<EducationLevel>(
@@ -1268,7 +1280,7 @@ class _SettingsPageState extends State<SettingsPage> {
             ],
           ),
           const SizedBox(height: 16),
-          FilledButton(onPressed: _save, child: const Text('儲存並返回')),
+          FilledButton(onPressed: _popWithSave, child: const Text('儲存並返回')),
             ],
           ),
         ),
