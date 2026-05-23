@@ -611,10 +611,12 @@ class _SettingsPageState extends State<SettingsPage> {
   bool _voicesLoading = false;
   String? _voicesError;
   List<({String name, String locale})> _zhVoices = const [];
+  bool _forceGoogleEngine = false;
 
   @override
   void initState() {
     super.initState();
+    _forceGoogleEngine = (widget.initial.ttsEngine == 'com.google.android.tts');
     _loadEnginesThenVoices();
   }
 
@@ -887,6 +889,25 @@ class _SettingsPageState extends State<SettingsPage> {
           const SizedBox(height: 20),
           const Text('語音（TTS）', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w600)),
           const SizedBox(height: 8),
+          SwitchListTile(
+            value: _forceGoogleEngine,
+            onChanged: (v) async {
+              setState(() => _forceGoogleEngine = v);
+              if (v) {
+                // 即使 getEngines 回空，也允許使用者強制指定 Google TTS（中國機常用）
+                setState(() => _ttsEngine = 'com.google.android.tts');
+                try {
+                  await _settingsTts.setEngine('com.google.android.tts');
+                } catch (_) {}
+              } else {
+                setState(() => _ttsEngine = null);
+              }
+              await _loadVoices();
+            },
+            title: const Text('強制使用 Google TTS'),
+            subtitle: const Text('需要先安裝「Speech Recognition & Synthesis / Speech Services by Google」。若你手機會列不到引擎，請開啟此項。'),
+          ),
+          const SizedBox(height: 8),
           if (_enginesLoading)
             const ListTile(
               leading: SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2)),
@@ -905,7 +926,9 @@ class _SettingsPageState extends State<SettingsPage> {
                 const DropdownMenuItem(value: 'auto', child: Text('自動（跟隨系統預設引擎）')),
                 ..._engines.map((e) => DropdownMenuItem(value: e.id, child: Text(e.label, overflow: TextOverflow.ellipsis))),
               ],
-              onChanged: (val) async {
+              onChanged: _forceGoogleEngine
+                  ? null
+                  : (val) async {
                 if (val == null) return;
                 if (val == 'auto') {
                   setState(() => _ttsEngine = null);
@@ -1243,12 +1266,13 @@ class _GamePageState extends State<GamePage> {
       }
       AppLogger.log('[TTS] engines=${engines.join(",")}');
       // 若使用者指定 engine，優先；否則如果裝了 Google TTS，預設優先用它（特別適用於中國版手機裝了 Speech Services by Google 後）。
+      // 注意：某些手機 getEngines 可能回空，但 setEngine('com.google.android.tts') 仍然可用；因此即使 engines 空也允許嘗試。
       final want = (widget.ttsEngine != null && widget.ttsEngine!.isNotEmpty)
           ? widget.ttsEngine!
-          : (engines.contains('com.google.android.tts') ? 'com.google.android.tts' : null);
+          : (engines.contains('com.google.android.tts') ? 'com.google.android.tts' : 'com.google.android.tts');
       if (want != null) {
         try {
-          await _tts.setEngine(want);
+          await _withTimeout(() => _tts.setEngine(want), seconds: 2, label: 'tts_set_engine');
           AppLogger.log('[TTS] engine=$want');
         } catch (e) {
           AppLogger.log('[TTS] setEngine fail ($want): $e');
@@ -1344,18 +1368,14 @@ class _GamePageState extends State<GamePage> {
     if (consume) {
       setState(() => _audioHintsLeft -= 1);
     }
-    try {
-      await _tts.stop();
-    } catch (_) {}
+    // 某些機型（GT5）在 await speak() 會永遠不回來；因此改成 fire-and-forget，不阻塞 UI。
     try {
       AppLogger.log('[TTS] speak(textHint)="$text"');
-      await _withTimeout(() => _tts.speak(text), seconds: 5, label: 'tts_speak_hint');
-      AppLogger.log('[TTS] speak done');
+      // ignore: discarded_futures
+      _tts.speak(text);
     } catch (e) {
       AppLogger.log('[TTS] speak error: $e');
-      if (mounted) {
-        setState(() => _feedback = '語音播放失敗：$e（可到系統 TTS 設定切換引擎/下載語音）');
-      }
+      if (mounted) setState(() => _feedback = '語音播放失敗：$e（可到系統 TTS 設定切換引擎/下載語音）');
     }
   }
 
@@ -1424,8 +1444,9 @@ class _GamePageState extends State<GamePage> {
         if (_ttsReady) {
           try {
             AppLogger.log('[TTS] speak(word)="${q.word}"');
-            await _withTimeout(() => _tts.speak(q.word), seconds: 5, label: 'tts_speak_word');
-            AppLogger.log('[TTS] speak done');
+            // 某些機型（GT5）在 await speak() 會永遠不回來；因此改成 fire-and-forget，不阻塞 UI。
+            // ignore: discarded_futures
+            _tts.speak(q.word);
           } catch (e) {
             AppLogger.log('[TTS] speak error: $e');
           }
@@ -1474,8 +1495,8 @@ class _GamePageState extends State<GamePage> {
         if (_ttsReady) {
           try {
             AppLogger.log('[TTS] speak(chain)="${q.currentWord}"');
-            await _withTimeout(() => _tts.speak(q.currentWord), seconds: 5, label: 'tts_speak_chain');
-            AppLogger.log('[TTS] speak done');
+            // ignore: discarded_futures
+            _tts.speak(q.currentWord);
           } catch (e) {
             AppLogger.log('[TTS] speak error: $e');
           }
