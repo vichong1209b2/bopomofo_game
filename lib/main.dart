@@ -612,11 +612,15 @@ class _SettingsPageState extends State<SettingsPage> {
   String? _voicesError;
   List<({String name, String locale})> _zhVoices = const [];
   bool _forceGoogleEngine = false;
+  String? _engineBeforeForce;
 
   @override
   void initState() {
     super.initState();
-    _forceGoogleEngine = (widget.initial.ttsEngine == 'com.google.android.tts');
+    // 重要：_forceGoogleEngine 代表「即使系統/ROM 列不到引擎，也要強制指定 Google TTS」的特殊模式。
+    // 這不應該因為使用者單純選了 Google 引擎就自動打開，否則下次進設定頁會把「引擎下拉選單」鎖住（反灰）。
+    _forceGoogleEngine = false;
+    _engineBeforeForce = null;
     _loadEnginesThenVoices();
   }
 
@@ -895,12 +899,15 @@ class _SettingsPageState extends State<SettingsPage> {
               setState(() => _forceGoogleEngine = v);
               if (v) {
                 // 即使 getEngines 回空，也允許使用者強制指定 Google TTS（中國機常用）
+                _engineBeforeForce = _ttsEngine; // 記住原本選擇，方便關閉強制後回復
                 setState(() => _ttsEngine = 'com.google.android.tts');
                 try {
                   await _settingsTts.setEngine('com.google.android.tts');
                 } catch (_) {}
               } else {
-                setState(() => _ttsEngine = null);
+                // 關閉強制模式：回復使用者原本的選擇（若沒有就回到 auto）
+                setState(() => _ttsEngine = _engineBeforeForce);
+                _engineBeforeForce = null;
               }
               await _loadVoices();
             },
