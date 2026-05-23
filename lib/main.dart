@@ -1347,7 +1347,16 @@ class _GamePageState extends State<GamePage> {
     try {
       await _tts.stop();
     } catch (_) {}
-    await _tts.speak(text);
+    try {
+      AppLogger.log('[TTS] speak(textHint)="$text"');
+      await _withTimeout(() => _tts.speak(text), seconds: 5, label: 'tts_speak_hint');
+      AppLogger.log('[TTS] speak done');
+    } catch (e) {
+      AppLogger.log('[TTS] speak error: $e');
+      if (mounted) {
+        setState(() => _feedback = '語音播放失敗：$e（可到系統 TTS 設定切換引擎/下載語音）');
+      }
+    }
   }
 
   @override
@@ -1413,7 +1422,13 @@ class _GamePageState extends State<GamePage> {
         setState(() => _qA = q);
         // 朗讀詞語（注音本身 TTS 不一定能順利朗讀）
         if (_ttsReady) {
-          await _tts.speak(q.word);
+          try {
+            AppLogger.log('[TTS] speak(word)="${q.word}"');
+            await _withTimeout(() => _tts.speak(q.word), seconds: 5, label: 'tts_speak_word');
+            AppLogger.log('[TTS] speak done');
+          } catch (e) {
+            AppLogger.log('[TTS] speak error: $e');
+          }
         }
       } else if (_activeMode == GameMode.bCharToBopo) {
         final q = await _withTimeout(
@@ -1457,7 +1472,13 @@ class _GamePageState extends State<GamePage> {
         setState(() => _qF = q);
         // 為了清楚一點：自動唸出目前詞語（接龍提示）
         if (_ttsReady) {
-          await _tts.speak(q.currentWord);
+          try {
+            AppLogger.log('[TTS] speak(chain)="${q.currentWord}"');
+            await _withTimeout(() => _tts.speak(q.currentWord), seconds: 5, label: 'tts_speak_chain');
+            AppLogger.log('[TTS] speak done');
+          } catch (e) {
+            AppLogger.log('[TTS] speak error: $e');
+          }
         }
       }
       if (mounted) setState(() => _questionLoading = false);

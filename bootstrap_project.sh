@@ -31,6 +31,20 @@ if manifest.exists():
   s = manifest.read_text(encoding="utf-8")
   # android:label="xxx" → android:label="注音遊戲"
   s2 = re.sub(r'android:label="[^"]*"', f'android:label="{label}"', s)
+
+  # Android 11+ 的 package visibility 會讓某些 API（例如列舉 TTS 引擎/voices）回傳空清單。
+  # 這裡加入 queries，允許查詢提供 TTS_SERVICE 的套件（包含 Google TTS）。
+  if "<queries>" not in s2:
+    queries = r'''
+  <queries>
+    <intent>
+      <action android:name="android.intent.action.TTS_SERVICE" />
+    </intent>
+    <package android:name="com.google.android.tts" />
+  </queries>
+'''.rstrip("\n")
+    s2 = re.sub(r'(<manifest[^>]*>)', r'\1\n' + queries, s2, count=1)
+
   manifest.write_text(s2, encoding="utf-8")
 
 strings = app_dir / "android/app/src/main/res/values/strings.xml"
