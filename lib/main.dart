@@ -466,10 +466,14 @@ class GameSettings {
         return t.contains('.') ? t.split('.').last : t;
       }
 
-      T enumByName<T>(List<T> values, String? name) {
-        if (name == null || name.isEmpty) throw Exception('missing enum name');
-        // ignore: avoid_dynamic_calls
-        return (values as dynamic).byName(_normEnumName(name)) as T;
+      // 不能用 values.byName(...) 的動態呼叫：extension method 在 dynamic 下不會生效，
+      // 會導致解析失敗進而回退 defaults，看起來像「設定無法保存」。
+      T enumByName<T extends Enum>(List<T> values, String? name) {
+        final n = _normEnumName(name);
+        if (n.isEmpty) throw Exception('missing enum name');
+        return values.firstWhere(
+          (e) => e.name == n || e.toString().split('.').last == n,
+        );
       }
 
       final playMode = enumByName(PlayMode.values, m['playMode']?.toString());
@@ -502,7 +506,8 @@ class GameSettings {
         ttsVoiceName: optStr(m['ttsVoiceName']),
         ttsVoiceLocale: optStr(m['ttsVoiceLocale']),
       );
-    } catch (_) {
+    } catch (e, st) {
+      AppLogger.log('[Prefs] parse settings failed: $e\n$st');
       return GameSettings.defaults();
     }
   }
@@ -582,6 +587,8 @@ class _HomePageState extends State<HomePage> {
       final raw = sp.getString(_prefsKeySettings);
       if (raw != null && raw.trim().isNotEmpty) {
         AppLogger.log('[Prefs] load settings: found (${raw.length} chars)');
+        // debug: 若後續又回預設，可用這行確認實際儲存的 JSON 格式（長度約 300 字元）
+        AppLogger.log('[Prefs] raw settings: $raw');
         _settings = GameSettings.fromMap(jsonDecode(raw));
       } else {
         AppLogger.log('[Prefs] load settings: not found -> defaults');
