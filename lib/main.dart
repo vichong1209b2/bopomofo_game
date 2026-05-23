@@ -80,12 +80,36 @@ enum PlayMode { practice, scoreTarget, correctTarget, timeAttack, survival }
 
 String levelLabel(EducationLevel l) {
   switch (l) {
-    case EducationLevel.elementary:
-      return '國小';
-    case EducationLevel.juniorHigh:
-      return '國中';
-    case EducationLevel.seniorHigh:
-      return '高中';
+    case EducationLevel.elementaryAll:
+      return '國小（綜合）';
+    case EducationLevel.elementary1:
+      return '國小一年級';
+    case EducationLevel.elementary2:
+      return '國小二年級';
+    case EducationLevel.elementary3:
+      return '國小三年級';
+    case EducationLevel.elementary4:
+      return '國小四年級';
+    case EducationLevel.elementary5:
+      return '國小五年級';
+    case EducationLevel.elementary6:
+      return '國小六年級';
+    case EducationLevel.juniorHighAll:
+      return '國中（綜合）';
+    case EducationLevel.juniorHigh1:
+      return '國中一年級';
+    case EducationLevel.juniorHigh2:
+      return '國中二年級';
+    case EducationLevel.juniorHigh3:
+      return '國中三年級';
+    case EducationLevel.seniorHighAll:
+      return '高中（綜合）';
+    case EducationLevel.seniorHigh1:
+      return '高中一年級';
+    case EducationLevel.seniorHigh2:
+      return '高中二年級';
+    case EducationLevel.seniorHigh3:
+      return '高中三年級';
     case EducationLevel.university:
       return '大學';
     case EducationLevel.graduate:
@@ -103,11 +127,23 @@ String levelLabel(EducationLevel l) {
 
 IconData levelIcon(EducationLevel l) {
   switch (l) {
-    case EducationLevel.elementary:
+    case EducationLevel.elementaryAll:
+    case EducationLevel.elementary1:
+    case EducationLevel.elementary2:
+    case EducationLevel.elementary3:
+    case EducationLevel.elementary4:
+    case EducationLevel.elementary5:
+    case EducationLevel.elementary6:
       return Icons.school;
-    case EducationLevel.juniorHigh:
+    case EducationLevel.juniorHighAll:
+    case EducationLevel.juniorHigh1:
+    case EducationLevel.juniorHigh2:
+    case EducationLevel.juniorHigh3:
       return Icons.book;
-    case EducationLevel.seniorHigh:
+    case EducationLevel.seniorHighAll:
+    case EducationLevel.seniorHigh1:
+    case EducationLevel.seniorHigh2:
+    case EducationLevel.seniorHigh3:
       return Icons.menu_book;
     case EducationLevel.university:
       return Icons.account_balance;
@@ -284,11 +320,23 @@ Widget _themedIcon(
 
 String _levelIconKey(EducationLevel l) {
   switch (l) {
-    case EducationLevel.elementary:
+    case EducationLevel.elementaryAll:
+    case EducationLevel.elementary1:
+    case EducationLevel.elementary2:
+    case EducationLevel.elementary3:
+    case EducationLevel.elementary4:
+    case EducationLevel.elementary5:
+    case EducationLevel.elementary6:
       return 'level_elementary';
-    case EducationLevel.juniorHigh:
+    case EducationLevel.juniorHighAll:
+    case EducationLevel.juniorHigh1:
+    case EducationLevel.juniorHigh2:
+    case EducationLevel.juniorHigh3:
       return 'level_juniorHigh';
-    case EducationLevel.seniorHigh:
+    case EducationLevel.seniorHighAll:
+    case EducationLevel.seniorHigh1:
+    case EducationLevel.seniorHigh2:
+    case EducationLevel.seniorHigh3:
       return 'level_seniorHigh';
     case EducationLevel.university:
       return 'level_university';
@@ -431,7 +479,8 @@ class GameSettings {
       flavor: DataFlavor.enhanced,
       playMode: PlayMode.scoreTarget,
       goal: defaultGoalFor(PlayMode.scoreTarget),
-      level: EducationLevel.juniorHigh,
+      // 預設等級：國小（符合你目前的需求）
+      level: EducationLevel.elementaryAll,
       themeStyle: ThemeStyle.sakura,
       soundEnabled: true,
       // TTS：預設跟隨系統（auto）
@@ -469,7 +518,21 @@ class GameSettings {
       // 不能用 values.byName(...) 的動態呼叫：extension method 在 dynamic 下不會生效，
       // 會導致解析失敗進而回退 defaults，看起來像「設定無法保存」。
       T enumByName<T extends Enum>(List<T> values, String? name) {
-        final n = _normEnumName(name);
+        String _compatEnumName(String s) {
+          // 相容舊版儲存的等級（elementary/juniorHigh/seniorHigh）
+          switch (s) {
+            case 'elementary':
+              return 'elementaryAll';
+            case 'juniorHigh':
+              return 'juniorHighAll';
+            case 'seniorHigh':
+              return 'seniorHighAll';
+            default:
+              return s;
+          }
+        }
+
+        final n = _compatEnumName(_normEnumName(name));
         if (n.isEmpty) throw Exception('missing enum name');
         return values.firstWhere(
           (e) => e.name == n || e.toString().split('.').last == n,
@@ -754,6 +817,7 @@ class _SettingsPageState extends State<SettingsPage> {
   late PlayMode _playMode = widget.initial.playMode;
   late GameGoal _goal = widget.initial.goal;
   late EducationLevel _level = widget.initial.level;
+  late EducationStage _stage = stageForLevel(widget.initial.level);
   late ThemeStyle _themeStyle = widget.initial.themeStyle;
   late bool _soundEnabled = widget.initial.soundEnabled;
   late String? _ttsEngine = widget.initial.ttsEngine;
@@ -1131,9 +1195,36 @@ class _SettingsPageState extends State<SettingsPage> {
                 const SizedBox(height: 12),
           const Text('等級', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w600)),
           const SizedBox(height: 8),
+          // 依你的需求：先選學段，再選年級（或綜合/大學以上）
+          DropdownButtonFormField<EducationStage>(
+            value: _stage,
+            items: EducationStage.values
+                .map((s) => DropdownMenuItem(
+                      value: s,
+                      child: Text(
+                        switch (s) {
+                          EducationStage.elementary => '國小',
+                          EducationStage.juniorHigh => '國中',
+                          EducationStage.seniorHigh => '高中',
+                          EducationStage.higher => '大學以上',
+                        },
+                      ),
+                    ))
+                .toList(),
+            onChanged: (v) {
+              if (v == null) return;
+              setState(() {
+                _stage = v;
+                final list = levelsForStage(_stage);
+                _level = list.isNotEmpty ? list.first : _level;
+              });
+            },
+            decoration: const InputDecoration(border: OutlineInputBorder(), labelText: '學段'),
+          ),
+          const SizedBox(height: 10),
           DropdownButtonFormField<EducationLevel>(
             value: _level,
-            items: EducationLevel.values.map((l) {
+            items: levelsForStage(_stage).map((l) {
               return DropdownMenuItem(
                 value: l,
                 child: Row(
@@ -1145,8 +1236,8 @@ class _SettingsPageState extends State<SettingsPage> {
                 ),
               );
             }).toList(),
-            onChanged: (v) => setState(() => _level = v!),
-            decoration: const InputDecoration(border: OutlineInputBorder()),
+            onChanged: (v) => setState(() => _level = v ?? _level),
+            decoration: const InputDecoration(border: OutlineInputBorder(), labelText: '年級 / 等級'),
           ),
           const SizedBox(height: 16),
           const Text('主題', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w600)),
@@ -2497,15 +2588,21 @@ class ThemedBackground extends StatelessWidget {
             child: IgnorePointer(
               child: Align(
                 alignment: Alignment.bottomCenter,
-                child: Opacity(
-                  opacity: 0.34,
-                  child: Image.asset(
-                    spec.heroAsset!,
-                    width: 420,
-                    height: 420,
-                    fit: BoxFit.contain,
-                    errorBuilder: (ctx, err, st) => const SizedBox.shrink(),
-                  ),
+                child: LayoutBuilder(
+                  builder: (ctx, c) {
+                    // 讓角色更「看得到」：依螢幕寬度自動縮放，並提高一點透明度。
+                    final size = (c.maxWidth * 0.92).clamp(260.0, 520.0);
+                    return Opacity(
+                      opacity: 0.48,
+                      child: Image.asset(
+                        spec.heroAsset!,
+                        width: size,
+                        height: size,
+                        fit: BoxFit.contain,
+                        errorBuilder: (ctx, err, st) => const SizedBox.shrink(),
+                      ),
+                    );
+                  },
                 ),
               ),
             ),

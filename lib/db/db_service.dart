@@ -114,7 +114,7 @@ class DbService {
     }
 
     // 國中：至少是「常用」或「國小」
-    if (level == EducationLevel.juniorHigh) {
+    if (stageForLevel(level) == EducationStage.juniorHigh) {
       parts.add('($alias.is_common = 1 OR $alias.is_primary_school = 1)');
     }
 
@@ -219,34 +219,75 @@ class DbService {
 
   Future<AudioToCharQuestion> randomAudioToCharQuestion({
     int optionCount = 4,
-    EducationLevel level = EducationLevel.juniorHigh,
+    EducationLevel level = EducationLevel.elementaryAll,
   }) async {
     List<Map<String, Object?>> w = const [];
     String? usedNote;
     bool usedAllowFlag = true;
 
+    // 內部一致性檢查：word.bopomofo 的音節數/內容要能對上 word_char.cp_id 的逐字注音
+    // （否則會出現「題目朗讀/顯示」與答案注音不一致，或玩家覺得題目有兩個答案）。
+    Future<bool> _wordBopoConsistent(int wordId, String wordBopo) async {
+      final b = wordBopo.trim();
+      if (b.isEmpty) return true; // 沒資料就不檢查
+      final syl = _syllables(b);
+      if (syl.isEmpty) return true;
+
+      final rows = await _db.rawQuery(r'''
+        SELECT wc.position, cp.bopomofo AS bopo
+        FROM word_char wc
+        JOIN character_pronunciation cp ON cp.cp_id = wc.cp_id
+        WHERE wc.word_id = ?
+          AND wc.cp_id IS NOT NULL
+        ORDER BY wc.position ASC
+      ''', [wordId]);
+
+      if (rows.isEmpty) return true;
+      if (rows.length != syl.length) return false;
+      for (var i = 0; i < rows.length; i++) {
+        final rb = (rows[i]['bopo'] as String?) ?? '';
+        if (rb.trim() != syl[i].trim()) return false;
+      }
+      return true;
+    }
+
     // 先試 allow_audio_to_char=1；若完全抓不到，再放寬移除 allow flag
-    for (final withAllow in [true, false]) {
-      for (final cand in _wordLevelWhereCandidates(level, alias: 'w')) {
-        final where = cand.where +
-            (withAllow ? " AND w.allow_audio_to_char = 1" : "") +
-            r'''
+    // 並且遇到「注音資料不一致」的詞會跳過，避免出到怪題。
+    for (var attempt = 0; attempt < 30; attempt++) {
+      w = const [];
+      usedNote = null;
+      usedAllowFlag = true;
+
+      for (final withAllow in [true, false]) {
+        for (final cand in _wordLevelWhereCandidates(level, alias: 'w')) {
+          final where = cand.where +
+              (withAllow ? " AND w.allow_audio_to_char = 1" : "") +
+              r'''
         AND EXISTS (
           SELECT 1 FROM word_char wc
           WHERE wc.word_id = w.word_id AND wc.cp_id IS NOT NULL
         )''';
-        w = await _randomWordPick(
-          selectSql: 'SELECT w.word_id, w.word, w.bopomofo FROM word w',
-          whereSql: where.trim(),
-          args: cand.args,
-        );
-        if (w.isNotEmpty) {
-          usedNote = cand.note;
-          usedAllowFlag = withAllow;
-          break;
+          w = await _randomWordPick(
+            selectSql: 'SELECT w.word_id, w.word, w.bopomofo FROM word w',
+            whereSql: where.trim(),
+            args: cand.args,
+          );
+          if (w.isNotEmpty) {
+            usedNote = cand.note;
+            usedAllowFlag = withAllow;
+            break;
+          }
         }
+        if (w.isNotEmpty) break;
       }
-      if (w.isNotEmpty) break;
+
+      if (w.isEmpty) break;
+
+      final wordId = (w.first['word_id'] as int);
+      final bopo = (w.first['bopomofo'] as String?) ?? '';
+      final ok = await _wordBopoConsistent(wordId, bopo);
+      if (ok) break;
+      AppLogger.log('[DB] A skip inconsistent word_id=$wordId');
     }
 
     if (w.isEmpty) {
@@ -324,7 +365,7 @@ class DbService {
 
   Future<CharToBopoQuestion> randomCharToBopoQuestion({
     int optionCount = 4,
-    EducationLevel level = EducationLevel.juniorHigh,
+    EducationLevel level = EducationLevel.elementaryAll,
   }) async {
     final cpFilter = _cpLevelWhere(level, alias: 'cp');
     List<Map<String, Object?>> rows = const [];
@@ -450,7 +491,7 @@ class DbService {
 
   Future<BopoToCharQuestion> randomBopoToCharQuestion({
     int optionCount = 4,
-    EducationLevel level = EducationLevel.juniorHigh,
+    EducationLevel level = EducationLevel.elementaryAll,
   }) async {
     final cpFilter = _cpLevelWhere(level, alias: 'cp');
     List<Map<String, Object?>> rows = const [];
@@ -520,9 +561,14 @@ class DbService {
         FROM character c
         WHERE c.game_priority != 'low'
           AND c.char != ?
+          AND c.char_id NOT IN (
+            SELECT cp2.char_id
+            FROM character_pronunciation cp2
+            WHERE cp2.bopomofo = ?
+          )
         ORDER BY RANDOM()
         LIMIT ?
-      ''', [answerChar, 80]);
+      ''', [answerChar, bopomofo, 80]);
       for (final r in other) {
         final ch = (r['ch'] as String?) ?? '';
         if (ch.isEmpty) continue;
@@ -539,7 +585,7 @@ class DbService {
 
   Future<WordToBopoQuestion> randomWordToBopoQuestion({
     int optionCount = 4,
-    EducationLevel level = EducationLevel.juniorHigh,
+    EducationLevel level = EducationLevel.elementaryAll,
   }) async {
     List<Map<String, Object?>> rows = const [];
     String? usedNote;
@@ -639,7 +685,7 @@ class DbService {
 
   Future<PairingRound> randomPairingRound({
     int pairCount = 4,
-    EducationLevel level = EducationLevel.juniorHigh,
+    EducationLevel level = EducationLevel.elementaryAll,
   }) async {
     // 配對題最容易因為條件不足而缺題：這裡做兩層 fallback
     // 1) pairCount: 4 -> 3 -> 2
@@ -658,7 +704,9 @@ class DbService {
       for (final withAllow in [true, false]) {
         for (final cand in _wordLevelWhereCandidates(level, alias: 'word')) {
           final where = cand.where + (withAllow ? ' AND allow_pairing = 1' : '');
-          rows = await _db.rawQuery(r'''
+          // ⚠️ 配對題容易因為「不同詞語有相同注音」而造成一個注音對到多個答案（看起來像有兩個答案）。
+          // 這裡改成先抽更大的池子，再在 Dart 端挑出「注音唯一」的組合。
+          final pool = await _db.rawQuery(r'''
       SELECT word, bopomofo
       FROM word
       WHERE ''' +
@@ -667,7 +715,21 @@ class DbService {
         AND bopomofo != ''
       ORDER BY RANDOM()
       LIMIT ?
-    ''', [...cand.args, pc]);
+    ''', [...cand.args, pc * 10]);
+
+          final picked = <Map<String, Object?>>[];
+          final usedBopo = <String>{};
+          for (final r in pool) {
+            final w = (r['word'] as String?) ?? '';
+            final b = (r['bopomofo'] as String?) ?? '';
+            if (w.isEmpty || b.isEmpty) continue;
+            if (usedBopo.contains(b)) continue;
+            usedBopo.add(b);
+            picked.add({'word': w, 'bopomofo': b});
+            if (picked.length >= pc) break;
+          }
+
+          rows = picked;
           if (rows.length >= pc) {
             usedNote = cand.note;
             usedAllow = withAllow;
@@ -704,7 +766,7 @@ class DbService {
   Future<WordChainQuestion> randomWordChainQuestion({
     String? currentWord,
     int optionCount = 4,
-    EducationLevel level = EducationLevel.juniorHigh,
+    EducationLevel level = EducationLevel.elementaryAll,
   }) async {
     String baseWord = currentWord ?? '';
     final wCandidates = _wordLevelWhereCandidates(level, alias: 'w');

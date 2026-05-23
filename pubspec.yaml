@@ -27,4 +27,15 @@ flutter:
     - assets/db/moe_enhanced.db
     - assets/db/moe_raw.db
     - assets/icon/app_icon.png
-    - assets/themes/
+    # 主題素材：有些 Flutter 版本/建置流程對「只列一層資料夾」的遞迴打包行為不一致，
+    # 這裡改成逐一列出，避免主題 badge/hero/deco/icon 沒被打進 APK（會顯示破圖/不顯示角色）。
+    - assets/themes/kuromi/
+    - assets/themes/kuromi/icons/
+    - assets/themes/cinnamoroll/
+    - assets/themes/cinnamoroll/icons/
+    - assets/themes/mymelody/
+    - assets/themes/mymelody/icons/
+    - assets/themes/carbot/
+    - assets/themes/carbot/icons/
+    - assets/themes/ultraman/
+    - assets/themes/ultraman/icons/

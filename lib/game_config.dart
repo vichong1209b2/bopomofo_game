@@ -7,15 +7,105 @@
 ///   - character.is_primary_school、character.is_common、character.game_priority
 /// 因此等級的範圍以這些欄位做「可解釋、可維護」的規則化映射。
 enum EducationLevel {
-  elementary,
-  juniorHigh,
-  seniorHigh,
+  // ====== 國小 ======
+  elementaryAll,
+  elementary1,
+  elementary2,
+  elementary3,
+  elementary4,
+  elementary5,
+  elementary6,
+
+  // ====== 國中 ======
+  juniorHighAll,
+  juniorHigh1,
+  juniorHigh2,
+  juniorHigh3,
+
+  // ====== 高中 ======
+  seniorHighAll,
+  seniorHigh1,
+  seniorHigh2,
+  seniorHigh3,
+
+  // ====== 大學以上（不分年級） ======
   university,
   graduate,
   working,
   expert,
   scholar,
   master,
+}
+
+/// 設定頁「先選學段再選年級」用的分群。
+enum EducationStage { elementary, juniorHigh, seniorHigh, higher }
+
+EducationStage stageForLevel(EducationLevel level) {
+  switch (level) {
+    case EducationLevel.elementaryAll:
+    case EducationLevel.elementary1:
+    case EducationLevel.elementary2:
+    case EducationLevel.elementary3:
+    case EducationLevel.elementary4:
+    case EducationLevel.elementary5:
+    case EducationLevel.elementary6:
+      return EducationStage.elementary;
+    case EducationLevel.juniorHighAll:
+    case EducationLevel.juniorHigh1:
+    case EducationLevel.juniorHigh2:
+    case EducationLevel.juniorHigh3:
+      return EducationStage.juniorHigh;
+    case EducationLevel.seniorHighAll:
+    case EducationLevel.seniorHigh1:
+    case EducationLevel.seniorHigh2:
+    case EducationLevel.seniorHigh3:
+      return EducationStage.seniorHigh;
+    case EducationLevel.university:
+    case EducationLevel.graduate:
+    case EducationLevel.working:
+    case EducationLevel.expert:
+    case EducationLevel.scholar:
+    case EducationLevel.master:
+      return EducationStage.higher;
+  }
+}
+
+List<EducationLevel> levelsForStage(EducationStage stage) {
+  switch (stage) {
+    case EducationStage.elementary:
+      return const [
+        EducationLevel.elementaryAll,
+        EducationLevel.elementary1,
+        EducationLevel.elementary2,
+        EducationLevel.elementary3,
+        EducationLevel.elementary4,
+        EducationLevel.elementary5,
+        EducationLevel.elementary6,
+      ];
+    case EducationStage.juniorHigh:
+      return const [
+        EducationLevel.juniorHighAll,
+        EducationLevel.juniorHigh1,
+        EducationLevel.juniorHigh2,
+        EducationLevel.juniorHigh3,
+      ];
+    case EducationStage.seniorHigh:
+      return const [
+        EducationLevel.seniorHighAll,
+        EducationLevel.seniorHigh1,
+        EducationLevel.seniorHigh2,
+        EducationLevel.seniorHigh3,
+      ];
+    case EducationStage.higher:
+      return const [
+        EducationLevel.university,
+        EducationLevel.graduate,
+        EducationLevel.working,
+        EducationLevel.expert,
+        EducationLevel.scholar,
+        EducationLevel.master,
+      ];
+  }
 }
 
 enum ThemeStyle {
@@ -55,7 +145,21 @@ class LevelRule {
 
 LevelRule ruleForLevel(EducationLevel level) {
   switch (level) {
-    case EducationLevel.elementary:
+    // ====== 國小（越後面越放寬） ======
+    case EducationLevel.elementary1:
+    case EducationLevel.elementary2:
+      // 小一/小二：先盡量收斂到最簡單的字詞（difficulty 1）
+      return const LevelRule(
+        maxWordDifficulty: 1,
+        requirePrimaryWords: true,
+        requireCommonWords: false,
+        includeLowPriorityWords: false,
+        requirePrimaryChars: true,
+        requireCommonChars: false,
+        includeLowPriorityChars: false,
+      );
+    case EducationLevel.elementary3:
+    case EducationLevel.elementary4:
       return const LevelRule(
         maxWordDifficulty: 2,
         requirePrimaryWords: true,
@@ -65,7 +169,33 @@ LevelRule ruleForLevel(EducationLevel level) {
         requireCommonChars: false,
         includeLowPriorityChars: false,
       );
-    case EducationLevel.juniorHigh:
+    case EducationLevel.elementary5:
+    case EducationLevel.elementary6:
+    case EducationLevel.elementaryAll:
+      return const LevelRule(
+        maxWordDifficulty: 2,
+        requirePrimaryWords: true,
+        requireCommonWords: false,
+        includeLowPriorityWords: false,
+        requirePrimaryChars: true,
+        requireCommonChars: false,
+        includeLowPriorityChars: false,
+      );
+
+    // ====== 國中 ======
+    case EducationLevel.juniorHigh1:
+      return const LevelRule(
+        maxWordDifficulty: 2,
+        requirePrimaryWords: false,
+        requireCommonWords: false,
+        includeLowPriorityWords: false,
+        requirePrimaryChars: false,
+        requireCommonChars: true,
+        includeLowPriorityChars: false,
+      );
+    case EducationLevel.juniorHigh2:
+    case EducationLevel.juniorHigh3:
+    case EducationLevel.juniorHighAll:
       return const LevelRule(
         maxWordDifficulty: 3,
         requirePrimaryWords: false,
@@ -75,7 +205,12 @@ LevelRule ruleForLevel(EducationLevel level) {
         requireCommonChars: true,
         includeLowPriorityChars: false,
       );
-    case EducationLevel.seniorHigh:
+
+    // ====== 高中 ======
+    case EducationLevel.seniorHigh1:
+    case EducationLevel.seniorHigh2:
+    case EducationLevel.seniorHigh3:
+    case EducationLevel.seniorHighAll:
       return const LevelRule(
         maxWordDifficulty: 4,
         requirePrimaryWords: false,
@@ -118,11 +253,24 @@ LevelRule ruleForLevel(EducationLevel level) {
 /// 設計：等級越高次數越少，讓玩法更像遊戲資源管理。
 int audioHintLimitForLevel(EducationLevel level) {
   switch (level) {
-    case EducationLevel.elementary:
+    case EducationLevel.elementary1:
+    case EducationLevel.elementary2:
+      return 6;
+    case EducationLevel.elementary3:
+    case EducationLevel.elementary4:
+    case EducationLevel.elementary5:
+    case EducationLevel.elementary6:
+    case EducationLevel.elementaryAll:
       return 5;
-    case EducationLevel.juniorHigh:
+    case EducationLevel.juniorHigh1:
+    case EducationLevel.juniorHigh2:
+    case EducationLevel.juniorHigh3:
+    case EducationLevel.juniorHighAll:
       return 4;
-    case EducationLevel.seniorHigh:
+    case EducationLevel.seniorHigh1:
+    case EducationLevel.seniorHigh2:
+    case EducationLevel.seniorHigh3:
+    case EducationLevel.seniorHighAll:
       return 3;
     case EducationLevel.university:
       return 2;
