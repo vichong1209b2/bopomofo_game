@@ -701,8 +701,8 @@ class _HomePageState extends State<HomePage> {
               child: const Text('開始'),
             ),
           ],
+            ),
           ),
-        ),
         ),
       ),
     );
@@ -987,18 +987,30 @@ class _SettingsPageState extends State<SettingsPage> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text('設定'),
-        actions: [
-          TextButton(onPressed: _resetToDefaults, child: const Text('預設')),
-          TextButton(onPressed: _save, child: const Text('儲存')),
-        ],
-      ),
-      body: Container(
-        child: ThemedBackground(
-          themeStyle: _themeStyle,
-          child: ListView(
+    // 重要：使用者常用左上角返回鍵或 Android 系統返回來離開設定頁。
+    // 若不攔截，Navigator.pop() 會回傳 null，導致主頁不會保存本次修改，看起來像「設定不會記憶」。
+    return WillPopScope(
+      onWillPop: () async {
+        _save();
+        return false;
+      },
+      child: Scaffold(
+        appBar: AppBar(
+          title: const Text('設定'),
+          leading: IconButton(
+            icon: const Icon(Icons.arrow_back),
+            onPressed: _save,
+            tooltip: '返回（並儲存）',
+          ),
+          actions: [
+            TextButton(onPressed: _resetToDefaults, child: const Text('預設')),
+            TextButton(onPressed: _save, child: const Text('儲存')),
+          ],
+        ),
+        body: Container(
+          child: ThemedBackground(
+            themeStyle: _themeStyle,
+            child: ListView(
           padding: const EdgeInsets.all(16),
           children: [
           const Text('等級', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w600)),
