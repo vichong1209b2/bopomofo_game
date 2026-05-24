@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_tts/flutter_tts.dart';
@@ -282,13 +283,12 @@ ThemeVisual themeVisual(ThemeStyle t) {
 Widget _themeBadge(ThemeStyle t, {double size = 22}) {
   final asset = themeVisual(t).badgeAsset;
   if (asset == null) return const SizedBox(width: 0, height: 0);
-  return ClipRRect(
-    borderRadius: BorderRadius.circular(6),
+  return ClipOval(
     child: Image.asset(
       asset,
       width: size,
       height: size,
-      fit: BoxFit.contain,
+      fit: BoxFit.cover,
       // 某些 build/裝置若 asset manifest 沒帶到主題圖（或路徑大小寫不一致），不要讓整個 UI 看起來像「按鈕消失」。
       errorBuilder: (ctx, err, st) => Icon(Icons.image_not_supported_outlined, size: size, color: Colors.black26),
     ),
@@ -307,6 +307,66 @@ Widget _themedIcon(
   required IconData fallback,
   double size = 24,
 }) {
+  // 改善：常用功能 icon 不再全都用「同一張方形 PNG」硬塞，改成：
+  // - 使用 Material icon（辨識度高）
+  // - 依 key 套用不同外形（圓形/膠囊/圓角方形…）
+  // - 顏色仍跟隨主題（保留「主題感」）
+  final actionShapeKeys = <String>{
+    'settings',
+    'log',
+    'volume',
+    'tune',
+    'refresh',
+    'palette',
+    'copy',
+    'delete',
+  };
+
+  Color accent(ThemeStyle t) => switch (t) {
+        ThemeStyle.sakura => const Color(0xFFB23A48),
+        ThemeStyle.ocean => const Color(0xFF00695C),
+        ThemeStyle.forest => const Color(0xFF2E7D32),
+        ThemeStyle.night => const Color(0xFF3949AB),
+        ThemeStyle.kuromi => const Color(0xFF6A1B9A),
+        ThemeStyle.cinnamoroll => const Color(0xFF1565C0),
+        ThemeStyle.mymelody => const Color(0xFFD81B60),
+        ThemeStyle.carbot => const Color(0xFF455A64),
+        ThemeStyle.ultraman => const Color(0xFFD32F2F),
+      };
+
+  ShapeBorder shapeForKey(String key) => switch (key) {
+        'settings' => const CircleBorder(),
+        'log' => RoundedRectangleBorder(borderRadius: BorderRadius.circular(size * 0.32)),
+        'volume' => const StadiumBorder(),
+        'tune' => RoundedRectangleBorder(borderRadius: BorderRadius.circular(size * 0.18)),
+        'refresh' => RoundedRectangleBorder(borderRadius: BorderRadius.circular(size * 0.50)),
+        'palette' => RoundedRectangleBorder(borderRadius: BorderRadius.circular(size * 0.22)),
+        'copy' => RoundedRectangleBorder(borderRadius: BorderRadius.circular(size * 0.14)),
+        'delete' => RoundedRectangleBorder(borderRadius: BorderRadius.circular(size * 0.14)),
+        _ => RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+      };
+
+  if (actionShapeKeys.contains(key)) {
+    final fg = Colors.white;
+    final bg = accent(t).withOpacity(0.92);
+    return SizedBox(
+      width: size,
+      height: size,
+      child: Material(
+        color: bg,
+        shape: shapeForKey(key),
+        child: Center(
+          child: Icon(
+            fallback,
+            size: (size * 0.62).clamp(14.0, 22.0),
+            color: fg,
+          ),
+        ),
+      ),
+    );
+  }
+
+  // 其它 icon（例如等級圖示）仍嘗試載入主題資源；若失敗則回退 Material icon。
   final asset = _themeIconAsset(t, key);
   if (asset == null) return Icon(fallback, size: size);
   return Image.asset(
@@ -1219,7 +1279,11 @@ class _SettingsPageState extends State<SettingsPage> {
               setState(() {
                 _stage = v;
                 final list = levelsForStage(_stage);
-                _level = list.isNotEmpty ? list.first : _level;
+                // 不要因為切換「學段」就把使用者原本選的等級洗回第一個，
+                // 否則會讓人以為「大學以上的研究所/社會人士/專家/學者/大師不見了」。
+                if (list.isNotEmpty && !list.contains(_level)) {
+                  _level = list.first;
+                }
               });
             },
             decoration: const InputDecoration(border: OutlineInputBorder(), labelText: '學段'),
@@ -1240,7 +1304,11 @@ class _SettingsPageState extends State<SettingsPage> {
               );
             }).toList(),
             onChanged: (v) => setState(() => _level = v ?? _level),
-            decoration: const InputDecoration(border: OutlineInputBorder(), labelText: '年級 / 等級'),
+            decoration: InputDecoration(
+              border: const OutlineInputBorder(),
+              labelText: _stage == EducationStage.higher ? '等級（大學以上不分年級）' : '年級 / 等級',
+              helperText: _stage == EducationStage.higher ? '研究所／社會人士／專家／學者／大師 都在這裡選' : null,
+            ),
           ),
           const SizedBox(height: 16),
           const Text('主題', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w600)),
@@ -2621,13 +2689,27 @@ class _GamePageState extends State<GamePage> {
           await showDialog(
             context: context,
             builder: (ctx) => AlertDialog(
-              title: const Text('本關詞語'),
+              title: const Text('玩法與本關詞語'),
               content: SizedBox(
                 width: double.maxFinite,
                 child: SingleChildScrollView(
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
-                    children: q.words.map((w) => Padding(padding: const EdgeInsets.only(bottom: 6), child: Text('• $w'))).toList(),
+                    children: [
+                      const Text(
+                        '玩法：\n'
+                        '1) 先點棋盤中「可填的格子」（會出現黃色框）\n'
+                        '2) 再點下方的「注音方塊」填入該格\n'
+                        '3) 填對會變綠、填錯會變紅；把所有可填格子都填對就過關\n'
+                        '\n'
+                        '接龍規則：上一個詞語「最後一個音節」= 下一個詞語「第一個音節」。\n'
+                        '（注音方塊可重複使用）',
+                      ),
+                      const SizedBox(height: 12),
+                      const Text('本關詞語：', style: TextStyle(fontWeight: FontWeight.w800)),
+                      const SizedBox(height: 6),
+                      ...q.words.map((w) => Padding(padding: const EdgeInsets.only(bottom: 6), child: Text('• $w'))),
+                    ],
                   ),
                 ),
               ),
@@ -2693,10 +2775,17 @@ class _GamePageState extends State<GamePage> {
               ],
             ),
             const SizedBox(height: 10),
+            Text(
+              '提示：先點格子（黃框）→ 再點下方注音方塊填入',
+              style: Theme.of(context).textTheme.bodySmall?.copyWith(color: Colors.black54),
+            ),
+            const SizedBox(height: 8),
             Expanded(
               child: LayoutBuilder(
                 builder: (ctx, c) {
-                  final size = (c.maxWidth / q.cols).floorToDouble();
+                  // 修復：當棋盤列數多、下方又有「可用注音」區塊時，
+                  // 原本用寬度推 cellSize 會導致高度超出 → 最下排被遮住/點不到。
+                  final size = math.min(c.maxWidth / q.cols, c.maxHeight / q.rows).floorToDouble();
                   final fontSize = (size * 0.32).clamp(12.0, 18.0);
                   return Center(
                     child: SizedBox(
