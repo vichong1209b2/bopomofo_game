@@ -142,27 +142,38 @@ class DbService {
     final base = _wordLevelWhere(level, alias: alias);
     out.add((where: base.where, args: base.args, note: 'base'));
 
-    // 2) 放寬：移除 primary/common 的硬性限制（仍保留 difficulty 與 priority）
+    // 2) 放寬：但仍「不跨學段」。
+    // 使用者選了某個年級/學段時，最重要的是不要出到更高學段的字詞；
+    // 因此 fallback 只放寬 difficulty/priority，不移除 primary/common 的門檻。
     final r = ruleForLevel(level);
-    final parts = <String>['$alias.difficulty <= ?'];
-    final args = <Object?>[r.maxWordDifficulty];
-    if (!r.includeLowPriorityWords) {
-      parts.add("$alias.game_priority != 'low'");
+    final guard = <String>[];
+    // 國小：只用國小字詞
+    if (r.requirePrimaryWords) {
+      guard.add('$alias.is_primary_school = 1');
     }
-    out.add((where: parts.join(' AND '), args: args, note: 'relax-primary-common'));
-
-    // 3) 放寬：提高 difficulty 到 5（仍保留 priority）
-    final parts2 = <String>['$alias.difficulty <= 5'];
-    if (!r.includeLowPriorityWords) {
-      parts2.add("$alias.game_priority != 'low'");
+    // 國中：至少是「常用」或「國小」
+    if (stageForLevel(level) == EducationStage.juniorHigh) {
+      guard.add('($alias.is_common = 1 OR $alias.is_primary_school = 1)');
     }
-    out.add((where: parts2.join(' AND '), args: const <Object?>[], note: 'relax-difficulty'));
+    // 高中/大學：以常用為主
+    if (r.requireCommonWords) {
+      guard.add('$alias.is_common = 1');
+    }
 
-    // 4) 最放寬：不限制 priority（只保留基本欄位存在）
-    out.add((where: '$alias.difficulty <= 5', args: const <Object?>[], note: 'relax-priority'));
+    // 2a) 放寬：保留 primary/common + difficulty，但允許低 priority
+    final partsA = <String>['$alias.difficulty <= ?', ...guard];
+    final argsA = <Object?>[r.maxWordDifficulty];
+    out.add((where: partsA.join(' AND '), args: argsA, note: 'relax-priority'));
 
-    // 5) 完全不限制（最後保底）
-    out.add((where: '1=1', args: const <Object?>[], note: 'no-filter'));
+    // 2b) 放寬：保留 primary/common，difficulty 提高到 5（仍排除 low priority）
+    final partsB = <String>['$alias.difficulty <= 5', ...guard];
+    if (!r.includeLowPriorityWords) {
+      partsB.add("$alias.game_priority != 'low'");
+    }
+    out.add((where: partsB.join(' AND '), args: const <Object?>[], note: 'relax-difficulty'));
+
+    // 2c) 放寬：只保留 primary/common（最後保底，但仍不跨學段）
+    out.add((where: (guard.isEmpty ? '1=1' : guard.join(' AND ')), args: const <Object?>[], note: 'stage-guard-only'));
 
     return out;
   }
@@ -176,18 +187,20 @@ class DbService {
     final base = _charLevelWhere(level, alias: alias);
     out.add((where: base.where, args: base.args, note: 'base'));
 
-    // 放寬：移除 primary/common 限制（保留 priority）
+    // 放寬：但仍不跨學段（不移除 primary/common 的門檻）
     final r = ruleForLevel(level);
-    final parts = <String>[];
-    if (!r.includeLowPriorityChars) {
-      parts.add("$alias.game_priority != 'low'");
+    final guard = <String>[];
+    if (r.requirePrimaryChars) {
+      guard.add('$alias.is_primary_school = 1');
+    } else if (r.requireCommonChars) {
+      guard.add('($alias.is_common = 1 OR $alias.is_primary_school = 1)');
     }
-    out.add((where: parts.isEmpty ? '1=1' : parts.join(' AND '), args: const <Object?>[], note: 'relax-primary-common'));
 
-    // 放寬：不限制 priority
-    out.add((where: '1=1', args: const <Object?>[], note: 'no-filter'));
+    // 2a) 放寬：保留 primary/common，但允許 low priority
+    out.add((where: (guard.isEmpty ? '1=1' : guard.join(' AND ')), args: const <Object?>[], note: 'relax-priority'));
     return out;
   }
+
 
   static ({String where, List<Object?> args}) _charLevelWhere(EducationLevel level, {String alias = 'c'}) {
     final r = ruleForLevel(level);
@@ -1111,7 +1124,10 @@ class DbService {
     // 放置策略：每個詞從上一個詞的終點開始（接點重疊），再選一個方向把音節依序放下去。
     // 方向每次盡量轉彎（避免一直直走），如果遇到邊界/衝突就整局重來。
 
-    final dirs = const <(int, int)>[(0, 1), (1, 0), (0, -1), (-1, 0)];
+    // 依需求：一般閱讀習慣是「由上往下」，
+    // 因此接龍路徑不允許往上走（避免玩家需要由下往上解讀/回填）。
+    // 左右移動沒問題、向下延伸沒問題。
+    final dirs = const <(int, int)>[(0, 1), (1, 0), (0, -1)];
 
     bool placeWord(List<String> syl, {required int sr, required int sc, required (int, int) dir}) {
       final (dr, dc) = dir;
@@ -1130,7 +1146,8 @@ class DbService {
 
     (int, int) addDir((int, int) p, (int, int) d, int step) => (p.$1 + d.$1 * step, p.$2 + d.$2 * step);
 
-    (int, int) start = ((rows / 2).floor(), (cols / 2).floor());
+    // 起點放在偏上方，確保後續「只往下/左右」仍有足夠空間可放置整段接龍
+    (int, int) start = (1, (cols / 2).floor());
     (int, int)? prevDir;
 
     // 嘗試多次隨機路徑（同一個 chain 內部重試），提高成功率
@@ -1138,7 +1155,7 @@ class DbService {
     for (var attempt = 0; attempt < 80; attempt++) {
       sol.clear();
       used.clear();
-      start = ((rows / 2).floor(), (cols / 2).floor());
+      start = (1, (cols / 2).floor());
       prevDir = null;
 
       bool okAll = true;
