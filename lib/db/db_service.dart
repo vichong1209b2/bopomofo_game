@@ -1188,17 +1188,34 @@ class DbService {
     // 注意：我們用同樣的 chain + 放置結果去找接點位置會很複雜；
     // 這裡採取一個穩健作法：優先固定「每個 used cell 中度數>=3 的交會點」不一定存在；
     // 因此改成：固定一部分 usedCells（均勻抽樣），並一定包含起點。
-    fixed.add(idx(start.$1, start.$2));
+    final startIdx = idx(start.$1, start.$2);
+    fixed.add(startIdx);
     final usedList = used.toList()..sort();
     // 均勻抽樣：讓提示分散在棋盤上（太集中會看不懂）
-    final hintCount = (usedList.length * 0.22).clamp(6, 14).toInt();
+    // 避免提示格過多導致「沒有空格可以填」：至少要保留一些 puzzleCells。
+    const minPuzzleCells = 3;
+    var hintCount = (usedList.length * 0.22).round().clamp(4, 14);
+    // 至少保留 minPuzzleCells（若題目本身太短，至少保留 1 格可填）
+    hintCount = min(hintCount, max(1, usedList.length - minPuzzleCells));
+    // 也不能把所有格子都固定（至少留 1 格可填）
+    hintCount = min(hintCount, usedList.length - 1);
+
     for (var i = 0; i < hintCount && i < usedList.length; i++) {
       final k = usedList[(i * usedList.length / hintCount).floor()];
       fixed.add(k);
     }
 
     // puzzleCells = used - fixed
-    final puzzleCells = used.difference(fixed);
+    var puzzleCells = used.difference(fixed);
+    // 最後保底：若仍然沒有可填格，移除部分提示（保留起點）
+    if (puzzleCells.isEmpty) {
+      final removable = fixed.where((k) => k != startIdx).toList()..shuffle(Random());
+      for (final k in removable) {
+        fixed.remove(k);
+        puzzleCells = used.difference(fixed);
+        if (puzzleCells.isNotEmpty) break;
+      }
+    }
 
     // tiles：把所有需要填的音節放進來（再加 2 個干擾）
     final tileSet = <String>{};

@@ -2216,13 +2216,25 @@ class _GamePageState extends State<GamePage> {
     return FilledButton.styleFrom();
   }
 
-  Widget _optionChild({required String opt, required String answer, double fontSize = 20}) {
+  String _choiceLabel(int index) {
+    const letters = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
+    if (index >= 0 && index < letters.length) return letters[index];
+    return '${index + 1}';
+  }
+
+  Widget _optionChild({
+    required String opt,
+    required String answer,
+    double fontSize = 20,
+    String? choiceLabel,
+  }) {
     final isCorrect = _locked && opt == answer;
     final isWrong = _wrongOptions.contains(opt);
+    final label = (choiceLabel == null || choiceLabel.isEmpty) ? '' : '$choiceLabel. ';
     return Text(
       isCorrect
-          ? '✓ $opt'
-          : (isWrong ? '✗ $opt' : opt),
+          ? '✓ $label$opt'
+          : (isWrong ? '✗ $label$opt' : '$label$opt'),
       textAlign: TextAlign.center,
       style: TextStyle(
         fontSize: fontSize,
@@ -2406,13 +2418,15 @@ class _GamePageState extends State<GamePage> {
                     crossAxisSpacing: 10,
                     mainAxisSpacing: 10,
                     childAspectRatio: 1.7,
-                    children: q.options.map((opt) {
+                    children: q.options.asMap().entries.map((e) {
+                      final idx = e.key;
+                      final opt = e.value;
                       return FilledButton.tonal(
                         style: _styleForOption(opt: opt, answer: q.answerChar),
                         onPressed: (_locked || _isFinished || _wrongOptions.contains(opt))
                             ? null
                             : () => _tapOption(opt: opt, answer: q.answerChar),
-                        child: _optionChild(opt: opt, answer: q.answerChar, fontSize: 22),
+                        child: _optionChild(opt: opt, answer: q.answerChar, fontSize: 22, choiceLabel: _choiceLabel(idx)),
                       );
                     }).toList(),
                   );
@@ -2443,7 +2457,9 @@ class _GamePageState extends State<GamePage> {
               const SizedBox(height: 10),
               Center(child: Text(q.character, style: const TextStyle(fontSize: 64, fontWeight: FontWeight.w800))),
               const SizedBox(height: 12),
-              ...q.options.map((opt) {
+              ...q.options.asMap().entries.map((e) {
+                final idx = e.key;
+                final opt = e.value;
                 return Padding(
                   padding: const EdgeInsets.only(bottom: 10),
                   child: FilledButton.tonal(
@@ -2451,7 +2467,12 @@ class _GamePageState extends State<GamePage> {
                     onPressed: (_locked || _isFinished || _wrongOptions.contains(opt))
                         ? null
                         : () => _tapOption(opt: opt, answer: q.answerBopomofo),
-                    child: _optionChild(opt: opt, answer: q.answerBopomofo, fontSize: 20),
+                    child: _optionChild(
+                      opt: opt,
+                      answer: q.answerBopomofo,
+                      fontSize: 20,
+                      choiceLabel: _choiceLabel(idx),
+                    ),
                   ),
                 );
               }),
@@ -2552,13 +2573,15 @@ class _GamePageState extends State<GamePage> {
                     crossAxisSpacing: 10,
                     mainAxisSpacing: 10,
                     childAspectRatio: 1.7,
-                    children: q.options.map((opt) {
+                    children: q.options.asMap().entries.map((e) {
+                      final idx = e.key;
+                      final opt = e.value;
                       return FilledButton.tonal(
                         style: _styleForOption(opt: opt, answer: q.answerChar),
                         onPressed: (_locked || _isFinished || _wrongOptions.contains(opt))
                             ? null
                             : () => _tapOption(opt: opt, answer: q.answerChar),
-                        child: _optionChild(opt: opt, answer: q.answerChar, fontSize: 22),
+                        child: _optionChild(opt: opt, answer: q.answerChar, fontSize: 22, choiceLabel: _choiceLabel(idx)),
                       );
                     }).toList(),
                   );
@@ -2578,7 +2601,9 @@ class _GamePageState extends State<GamePage> {
               const SizedBox(height: 10),
               Center(child: Text(q.word, style: const TextStyle(fontSize: 44, fontWeight: FontWeight.w800))),
               const SizedBox(height: 12),
-              ...q.options.map((opt) {
+              ...q.options.asMap().entries.map((e) {
+                final idx = e.key;
+                final opt = e.value;
                 return Padding(
                   padding: const EdgeInsets.only(bottom: 10),
                   child: FilledButton.tonal(
@@ -2586,7 +2611,12 @@ class _GamePageState extends State<GamePage> {
                     onPressed: (_locked || _isFinished || _wrongOptions.contains(opt))
                         ? null
                         : () => _tapOption(opt: opt, answer: q.answerBopomofo),
-                    child: _optionChild(opt: opt, answer: q.answerBopomofo, fontSize: 20),
+                    child: _optionChild(
+                      opt: opt,
+                      answer: q.answerBopomofo,
+                      fontSize: 20,
+                      choiceLabel: _choiceLabel(idx),
+                    ),
                   ),
                 );
               }),
@@ -2614,7 +2644,9 @@ class _GamePageState extends State<GamePage> {
               const SizedBox(height: 10),
               Text('下一個詞語要以「${q.targetStartChar}」開頭：', style: const TextStyle(color: Colors.black87)),
               const SizedBox(height: 10),
-              ...q.options.map((opt) {
+              ...q.options.asMap().entries.map((e) {
+                final idx = e.key;
+                final opt = e.value;
                 return Padding(
                   padding: const EdgeInsets.only(bottom: 10),
                   child: FilledButton.tonal(
@@ -2622,7 +2654,7 @@ class _GamePageState extends State<GamePage> {
                     onPressed: (_locked || _isFinished || _wrongOptions.contains(opt))
                         ? null
                         : () => _tapOption(opt: opt, answer: q.answerWord),
-                    child: _optionChild(opt: opt, answer: q.answerWord, fontSize: 22),
+                    child: _optionChild(opt: opt, answer: q.answerWord, fontSize: 22, choiceLabel: _choiceLabel(idx)),
                   ),
                 );
               }),
@@ -2764,29 +2796,61 @@ class _GamePageState extends State<GamePage> {
             Expanded(
               child: LayoutBuilder(
                 builder: (ctx, c) {
-                  // 修復：當棋盤列數多、下方又有「可用注音」區塊時，
+                  // 改善：只顯示「實際有用到」的棋盤區域（外加一圈 padding），
+                  // 讓格子看起來更大、不會因為整張 10x10 空白太多而變很小。
+                  //
+                  // 同時保留用 maxHeight 計算，避免下方「可用注音」把棋盤擠到看不到。
+                  int rowOf(int cell) => cell ~/ q.cols;
+                  int colOf(int cell) => cell % q.cols;
+                  var minR = q.rows, maxR = -1, minC = q.cols, maxC = -1;
+                  for (final cell in q.usedCells) {
+                    final r = rowOf(cell);
+                    final c2 = colOf(cell);
+                    if (r < minR) minR = r;
+                    if (r > maxR) maxR = r;
+                    if (c2 < minC) minC = c2;
+                    if (c2 > maxC) maxC = c2;
+                  }
+                  if (maxR < 0 || maxC < 0) {
+                    minR = 0;
+                    maxR = q.rows - 1;
+                    minC = 0;
+                    maxC = q.cols - 1;
+                  }
+                  const pad = 1;
+                  minR = math.max(0, minR - pad);
+                  minC = math.max(0, minC - pad);
+                  maxR = math.min(q.rows - 1, maxR + pad);
+                  maxC = math.min(q.cols - 1, maxC + pad);
+                  final viewRows = (maxR - minR + 1);
+                  final viewCols = (maxC - minC + 1);
+
                   // 原本用寬度推 cellSize 會導致高度超出 → 最下排被遮住/點不到。
-                  final size = math.min(c.maxWidth / q.cols, c.maxHeight / q.rows).floorToDouble();
+                  final size = math.min(c.maxWidth / viewCols, c.maxHeight / viewRows).floorToDouble();
                   // 注音符號有「上方聲調/標記」與「下方韻母」，
                   // 如果格子偏小、又遇到某些字型，會看起來像「只顯示上半部」。
                   // 這裡把字體稍微放大，但用 FittedBox(scaleDown) 保證永遠不會被裁切。
-                  final fontSize = (size * 0.38).clamp(14.0, 22.0);
+                  final fontSize = (size * 0.44).clamp(16.0, 28.0);
                   return Center(
                     child: SizedBox(
-                      width: size * q.cols,
-                      height: size * q.rows,
+                      width: size * viewCols,
+                      height: size * viewRows,
                       child: GridView.builder(
                         physics: const NeverScrollableScrollPhysics(),
-                        gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(crossAxisCount: q.cols),
-                        itemCount: q.rows * q.cols,
+                        gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(crossAxisCount: viewCols),
+                        itemCount: viewRows * viewCols,
                         itemBuilder: (ctx, i) {
-                          final selected = _gridSelectedCell == i;
-                          final used = q.usedCells.contains(i);
-                          final isPuzzle = q.puzzleCells.contains(i);
-                          final bg = cellColor(i);
-                          final text = cellText(i);
+                          final vr = i ~/ viewCols;
+                          final vc = i % viewCols;
+                          final cell = (minR + vr) * q.cols + (minC + vc);
+
+                          final selected = _gridSelectedCell == cell;
+                          final used = q.usedCells.contains(cell);
+                          final isPuzzle = q.puzzleCells.contains(cell);
+                          final bg = cellColor(cell);
+                          final text = cellText(cell);
                           return GestureDetector(
-                            onTap: isPuzzle ? () => selectCell(i) : null,
+                            onTap: isPuzzle ? () => selectCell(cell) : null,
                             child: Container(
                               margin: const EdgeInsets.all(1.2),
                               decoration: BoxDecoration(
