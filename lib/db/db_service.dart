@@ -940,7 +940,8 @@ class DbService {
   Future<BopoChainGridPuzzle> randomBopoChainGridPuzzle({
     EducationLevel level = EducationLevel.elementaryAll,
     int wordCount = 6,
-    int gridSize = 9,
+    // 依需求：詞語音節數不固定（可到 6），棋盤尺寸加大一點避免放不下
+    int gridSize = 11,
   }) async {
     // 以「詞語注音」做接龍：上一個詞語最後一個音節 = 下一個詞語第一個音節
     // 再把每個音節放進棋盤的格子，形成可交錯的路徑。
@@ -998,7 +999,8 @@ class DbService {
   }) async {
     // 限制字長，避免棋盤塞不下
     const minLen = 2;
-    const maxLen = 4;
+    // 依需求：不一定固定 4 格，允許更長一些（2~6 音節）
+    const maxLen = 6;
 
     // 挑起始詞（有注音、常用、長度合理）
     Future<({String word, String bopo})?> pickStart() async {
@@ -1100,19 +1102,22 @@ class DbService {
     final cols = gridSize;
     int idx(int r, int c) => r * cols + c;
 
-    // 交錯放置：H→V→H→V...
-    var r0 = (rows / 2).floor();
-    var c0 = 2;
-    var horizontal = true;
-    var dir = 1; // H: +1 往右, -1 往左
-
     final sol = <int, String>{};
     final used = <int>{};
 
-    bool placeWord(List<String> syl, {required int sr, required int sc, required bool h, required int dir}) {
+    // 依需求：棋盤路徑不再固定「H/V 交錯、只往右/往下」，
+    // 改成允許上下左右轉彎，做出更像成語填字/接龍的不規則路徑。
+    //
+    // 放置策略：每個詞從上一個詞的終點開始（接點重疊），再選一個方向把音節依序放下去。
+    // 方向每次盡量轉彎（避免一直直走），如果遇到邊界/衝突就整局重來。
+
+    final dirs = const <(int, int)>[(0, 1), (1, 0), (0, -1), (-1, 0)];
+
+    bool placeWord(List<String> syl, {required int sr, required int sc, required (int, int) dir}) {
+      final (dr, dc) = dir;
       for (var i = 0; i < syl.length; i++) {
-        final r = sr + (h ? 0 : i);
-        final c = sc + (h ? dir * i : 0);
+        final r = sr + dr * i;
+        final c = sc + dc * i;
         if (r < 0 || r >= rows || c < 0 || c >= cols) return false;
         final k = idx(r, c);
         final v = syl[i];
@@ -1123,47 +1128,73 @@ class DbService {
       return true;
     }
 
-    // 放第一個詞
-    if (!placeWord(chain.first.syl, sr: r0, sc: c0, h: true, dir: dir)) return null;
-    var endR = r0;
-    var endC = c0 + dir * (chain.first.syl.length - 1);
+    (int, int) addDir((int, int) p, (int, int) d, int step) => (p.$1 + d.$1 * step, p.$2 + d.$2 * step);
 
-    for (var wi = 1; wi < chain.length; wi++) {
-      horizontal = !horizontal;
-      if (horizontal) dir = -dir; // 每次水平換方向，避免一直往同一側衝
-      final syl = chain[wi].syl;
-      final ok = placeWord(syl, sr: endR, sc: endC, h: horizontal, dir: dir);
-      if (!ok) return null;
-      if (horizontal) {
-        endC = endC + dir * (syl.length - 1);
-      } else {
-        endR = endR + (syl.length - 1);
+    (int, int) start = ((rows / 2).floor(), (cols / 2).floor());
+    (int, int)? prevDir;
+
+    // 嘗試多次隨機路徑（同一個 chain 內部重試），提高成功率
+    var placedOk = false;
+    for (var attempt = 0; attempt < 80; attempt++) {
+      sol.clear();
+      used.clear();
+      start = ((rows / 2).floor(), (cols / 2).floor());
+      prevDir = null;
+
+      bool okAll = true;
+      var pos = start;
+      for (var wi = 0; wi < chain.length; wi++) {
+        final syl = chain[wi].syl;
+
+        // 候選方向：盡量「轉彎」，其次才是直走；避免常常卡到邊界
+        final candidates = <(int, int)>[];
+        for (final d in dirs) {
+          if (prevDir != null) {
+            final same = (d.$1 == prevDir!.$1 && d.$2 == prevDir!.$2);
+            final opposite = (d.$1 == -prevDir!.$1 && d.$2 == -prevDir!.$2);
+            if (same || opposite) continue; // 優先轉彎
+          }
+          candidates.add(d);
+        }
+        // 若轉彎都不行，最後才允許直走/反向
+        if (candidates.isEmpty) candidates.addAll(dirs);
+        candidates.shuffle(Random());
+
+        bool placed = false;
+        for (final d in candidates) {
+          if (!placeWord(syl, sr: pos.$1, sc: pos.$2, dir: d)) continue;
+          prevDir = d;
+          pos = addDir(pos, d, syl.length - 1);
+          placed = true;
+          break;
+        }
+        if (!placed) {
+          okAll = false;
+          break;
+        }
+      }
+
+      if (okAll && used.isNotEmpty) {
+        placedOk = true;
+        break;
       }
     }
 
-    // 固定一些提示格：每個詞的第一格（也就是接點）+ 第一個詞的第一格
-    final fixed = <int>{};
-    // 重算每個詞的起點並收集固定格
-    r0 = (rows / 2).floor();
-    c0 = 2;
-    horizontal = true;
-    dir = 1;
-    fixed.add(idx(r0, c0));
-    endR = r0;
-    endC = c0 + dir * (chain.first.syl.length - 1);
-    fixed.add(idx(endR, endC)); // 第一個詞的尾端（也是接點）
+    if (!placedOk) return null;
 
-    for (var wi = 1; wi < chain.length; wi++) {
-      horizontal = !horizontal;
-      if (horizontal) dir = -dir;
-      fixed.add(idx(endR, endC)); // 每個新詞的起點（接點）
-      final syl = chain[wi].syl;
-      if (horizontal) {
-        endC = endC + dir * (syl.length - 1);
-      } else {
-        endR = endR + (syl.length - 1);
-      }
-      fixed.add(idx(endR, endC)); // 每個詞的尾端也給一點提示，避免太難
+    // 固定一些提示格：每個詞的接點（起點=上一詞終點）+ 第一個詞起點，再額外隨機給少量提示
+    final fixed = <int>{};
+    // 重走一次路徑，收集接點/尾端（用 sol 的內容重建）
+    // 注意：我們用同樣的 chain + 放置結果去找接點位置會很複雜；
+    // 這裡採取一個穩健作法：優先固定「每個 used cell 中度數>=3 的交會點」不一定存在；
+    // 因此改成：固定一部分 usedCells（均勻抽樣），並一定包含起點。
+    fixed.add(idx(start.$1, start.$2));
+    final usedList = used.toList()..sort();
+    // 均勻抽樣：讓提示分散在棋盤上（太集中會看不懂）
+    final hintCount = (usedList.length * 0.22).clamp(6, 14).toInt();
+    for (var i = 0; i < hintCount && i < usedList.length; i++) {
+      final k = usedList[(i * usedList.length / hintCount).floor()];
+      fixed.add(k);
     }
 
     // puzzleCells = used - fixed

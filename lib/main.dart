@@ -322,6 +322,9 @@ Widget _themedIcon(
     'delete',
   };
 
+  // 等級 icon（level_*）也用「不同形狀的底」包起來，避免看起來像低解析方塊圖。
+  bool shouldUseShapedMaterial(String key) => actionShapeKeys.contains(key) || key.startsWith('level_');
+
   Color accent(ThemeStyle t) => switch (t) {
         ThemeStyle.sakura => const Color(0xFFB23A48),
         ThemeStyle.ocean => const Color(0xFF00695C),
@@ -343,10 +346,20 @@ Widget _themedIcon(
         'palette' => RoundedRectangleBorder(borderRadius: BorderRadius.circular(size * 0.22)),
         'copy' => RoundedRectangleBorder(borderRadius: BorderRadius.circular(size * 0.14)),
         'delete' => RoundedRectangleBorder(borderRadius: BorderRadius.circular(size * 0.14)),
+        // 等級：用不同外形讓辨識度更高
+        'level_elementary' => const CircleBorder(),
+        'level_juniorHigh' => RoundedRectangleBorder(borderRadius: BorderRadius.circular(size * 0.22)),
+        'level_seniorHigh' => const StadiumBorder(),
+        'level_university' => RoundedRectangleBorder(borderRadius: BorderRadius.circular(size * 0.18)),
+        'level_graduate' => RoundedRectangleBorder(borderRadius: BorderRadius.circular(size * 0.30)),
+        'level_working' => RoundedRectangleBorder(borderRadius: BorderRadius.circular(size * 0.14)),
+        'level_expert' => RoundedRectangleBorder(borderRadius: BorderRadius.circular(size * 0.40)),
+        'level_scholar' => RoundedRectangleBorder(borderRadius: BorderRadius.circular(size * 0.26)),
+        'level_master' => const CircleBorder(),
         _ => RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
       };
 
-  if (actionShapeKeys.contains(key)) {
+  if (shouldUseShapedMaterial(key)) {
     final fg = Colors.white;
     final bg = accent(t).withOpacity(0.92);
     return SizedBox(
@@ -880,7 +893,6 @@ class _SettingsPageState extends State<SettingsPage> {
   late PlayMode _playMode = widget.initial.playMode;
   late GameGoal _goal = widget.initial.goal;
   late EducationLevel _level = widget.initial.level;
-  late EducationStage _stage = stageForLevel(widget.initial.level);
   late ThemeStyle _themeStyle = widget.initial.themeStyle;
   late bool _soundEnabled = widget.initial.soundEnabled;
   late String? _ttsEngine = widget.initial.ttsEngine;
@@ -1258,40 +1270,11 @@ class _SettingsPageState extends State<SettingsPage> {
                 const SizedBox(height: 12),
           const Text('等級', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w600)),
           const SizedBox(height: 8),
-          // 依你的需求：先選學段，再選年級（或綜合/大學以上）
-          DropdownButtonFormField<EducationStage>(
-            value: _stage,
-            items: EducationStage.values
-                .map((s) => DropdownMenuItem(
-                      value: s,
-                      child: Text(
-                        switch (s) {
-                          EducationStage.elementary => '國小',
-                          EducationStage.juniorHigh => '國中',
-                          EducationStage.seniorHigh => '高中',
-                          EducationStage.higher => '大學以上',
-                        },
-                      ),
-                    ))
-                .toList(),
-            onChanged: (v) {
-              if (v == null) return;
-              setState(() {
-                _stage = v;
-                final list = levelsForStage(_stage);
-                // 不要因為切換「學段」就把使用者原本選的等級洗回第一個，
-                // 否則會讓人以為「大學以上的研究所/社會人士/專家/學者/大師不見了」。
-                if (list.isNotEmpty && !list.contains(_level)) {
-                  _level = list.first;
-                }
-              });
-            },
-            decoration: const InputDecoration(border: OutlineInputBorder(), labelText: '學段'),
-          ),
-          const SizedBox(height: 10),
+          // 依你的回饋：不要把「研究所/社會人士/專家/學者/大師」藏在第二層，
+          // 改成「同一個下拉」一次選到，避免誤以為等級消失。
           DropdownButtonFormField<EducationLevel>(
             value: _level,
-            items: levelsForStage(_stage).map((l) {
+            items: EducationLevel.values.map((l) {
               return DropdownMenuItem(
                 value: l,
                 child: Row(
@@ -1304,11 +1287,7 @@ class _SettingsPageState extends State<SettingsPage> {
               );
             }).toList(),
             onChanged: (v) => setState(() => _level = v ?? _level),
-            decoration: InputDecoration(
-              border: const OutlineInputBorder(),
-              labelText: _stage == EducationStage.higher ? '等級（大學以上不分年級）' : '年級 / 等級',
-              helperText: _stage == EducationStage.higher ? '研究所／社會人士／專家／學者／大師 都在這裡選' : null,
-            ),
+            decoration: const InputDecoration(border: OutlineInputBorder(), labelText: '年級 / 等級'),
           ),
           const SizedBox(height: 16),
           const Text('主題', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w600)),
@@ -2697,13 +2676,15 @@ class _GamePageState extends State<GamePage> {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       const Text(
-                        '玩法：\n'
-                        '1) 先點棋盤中「可填的格子」（會出現黃色框）\n'
-                        '2) 再點下方的「注音方塊」填入該格\n'
-                        '3) 填對會變綠、填錯會變紅；把所有可填格子都填對就過關\n'
+                        '快速上手：\n'
+                        '1) 找「可填格」：顏色是藍綠色、點了會出現黃色框\n'
+                        '2) 先點格子 → 再點下方「注音方塊」把音節填進去\n'
+                        '3) 填對：變綠色；填錯：變紅色（再換別的方塊即可）\n'
+                        '4) 把所有可填格都填對就過關\n'
                         '\n'
-                        '接龍規則：上一個詞語「最後一個音節」= 下一個詞語「第一個音節」。\n'
-                        '（注音方塊可重複使用）',
+                        '接龍概念：上一個詞語的「最後一個音節」會接到下一個詞語的「第一個音節」，\n'
+                        '所以棋盤路徑會轉彎、每個詞語音節數也可能不同（不一定 4 格）。\n'
+                        '（下方注音方塊可重複使用）',
                       ),
                       const SizedBox(height: 12),
                       const Text('本關詞語：', style: TextStyle(fontWeight: FontWeight.w800)),
@@ -2776,7 +2757,7 @@ class _GamePageState extends State<GamePage> {
             ),
             const SizedBox(height: 10),
             Text(
-              '提示：先點格子（黃框）→ 再點下方注音方塊填入',
+              '提示：先點「可填格」（會出現黃框）→ 再點下方注音方塊填入',
               style: Theme.of(context).textTheme.bodySmall?.copyWith(color: Colors.black54),
             ),
             const SizedBox(height: 8),
@@ -2809,8 +2790,13 @@ class _GamePageState extends State<GamePage> {
                                 color: bg,
                                 borderRadius: BorderRadius.circular(6),
                                 border: Border.all(
-                                  color: selected ? Colors.amber : Colors.black12,
-                                  width: selected ? 2.4 : 1.0,
+                                  // 更清楚地區分「可填格」：未選取時也有淡淡的黃框，選取時加粗
+                                  color: !used
+                                      ? Colors.transparent
+                                      : (selected
+                                          ? Colors.amber
+                                          : (isPuzzle ? Colors.amber.withOpacity(0.40) : Colors.black12)),
+                                  width: selected ? 2.6 : (isPuzzle ? 1.6 : 1.0),
                                 ),
                                 boxShadow: [
                                   if (used)
@@ -2844,27 +2830,32 @@ class _GamePageState extends State<GamePage> {
             const SizedBox(height: 10),
             const Text('可用注音（可重複使用）：', style: TextStyle(fontWeight: FontWeight.w700)),
             const SizedBox(height: 8),
-            SingleChildScrollView(
-              child: Wrap(
-                spacing: 8,
-                runSpacing: 8,
-                children: q.tiles.map((t) {
-                  return InkWell(
-                    onTap: (_locked || _isFinished) ? null : () => fillSelected(t),
-                    child: Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-                      decoration: BoxDecoration(
-                        color: const Color(0xFF00695C),
-                        borderRadius: BorderRadius.circular(12),
-                        border: Border.all(color: Colors.white.withOpacity(0.22)),
+            // 修復：當注音方塊很多時，Wrap 會把高度撐得太高，導致棋盤區域被擠壓到「最下排很難點」。
+            // 固定一個高度，讓注音方塊區改成可捲動。
+            SizedBox(
+              height: 190,
+              child: SingleChildScrollView(
+                child: Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  children: q.tiles.map((t) {
+                    return InkWell(
+                      onTap: (_locked || _isFinished) ? null : () => fillSelected(t),
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFF00695C),
+                          borderRadius: BorderRadius.circular(12),
+                          border: Border.all(color: Colors.white.withOpacity(0.22)),
+                        ),
+                        child: Text(
+                          t,
+                          style: const TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.w900),
+                        ),
                       ),
-                      child: Text(
-                        t,
-                        style: const TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.w900),
-                      ),
-                    ),
-                  );
-                }).toList(),
+                    );
+                  }).toList(),
+                ),
               ),
             ),
           ],
