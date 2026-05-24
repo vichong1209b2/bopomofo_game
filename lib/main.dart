@@ -2767,7 +2767,10 @@ class _GamePageState extends State<GamePage> {
                   // 修復：當棋盤列數多、下方又有「可用注音」區塊時，
                   // 原本用寬度推 cellSize 會導致高度超出 → 最下排被遮住/點不到。
                   final size = math.min(c.maxWidth / q.cols, c.maxHeight / q.rows).floorToDouble();
-                  final fontSize = (size * 0.32).clamp(12.0, 18.0);
+                  // 注音符號有「上方聲調/標記」與「下方韻母」，
+                  // 如果格子偏小、又遇到某些字型，會看起來像「只顯示上半部」。
+                  // 這裡把字體稍微放大，但用 FittedBox(scaleDown) 保證永遠不會被裁切。
+                  final fontSize = (size * 0.38).clamp(14.0, 22.0);
                   return Center(
                     child: SizedBox(
                       width: size * q.cols,
@@ -2807,14 +2810,27 @@ class _GamePageState extends State<GamePage> {
                                     ),
                                 ],
                               ),
-                              child: Center(
-                                child: Text(
-                                  text ?? '',
-                                  textAlign: TextAlign.center,
-                                  style: TextStyle(
-                                    fontSize: fontSize,
-                                    fontWeight: FontWeight.w800,
-                                    color: used ? Colors.white : Colors.black26,
+                              child: Padding(
+                                padding: EdgeInsets.symmetric(vertical: math.max(2, size * 0.10), horizontal: 2),
+                                child: Center(
+                                  child: FittedBox(
+                                    fit: BoxFit.scaleDown,
+                                    child: Text(
+                                      text ?? '',
+                                      textAlign: TextAlign.center,
+                                      style: TextStyle(
+                                        fontSize: fontSize,
+                                        height: 1.15,
+                                        fontWeight: FontWeight.w800,
+                                        color: used ? Colors.white : Colors.black26,
+                                      ),
+                                      strutStyle: const StrutStyle(forceStrutHeight: true, height: 1.15),
+                                      textHeightBehavior: const TextHeightBehavior(
+                                        applyHeightToFirstAscent: false,
+                                        applyHeightToLastDescent: false,
+                                        leadingDistribution: TextLeadingDistribution.even,
+                                      ),
+                                    ),
                                   ),
                                 ),
                               ),
@@ -2901,8 +2917,10 @@ class ThemedBackground extends StatelessWidget {
                   builder: (ctx, c) {
                     // 讓角色更「看得到」：依螢幕寬度自動縮放，並提高一點透明度。
                     final size = (c.maxWidth * 0.92).clamp(260.0, 520.0);
+                    // 使用者提供的主題圖多為整張插畫；透明度太高會顯得突兀，
+                    // 降低透明度，讓背景更柔和且文字更清楚。
                     return Opacity(
-                      opacity: 0.48,
+                      opacity: 0.18,
                       child: Image.asset(
                         spec.heroAsset!,
                         width: size,

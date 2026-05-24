@@ -941,7 +941,7 @@ class DbService {
     EducationLevel level = EducationLevel.elementaryAll,
     int wordCount = 6,
     // 依需求：詞語音節數不固定（可到 6），棋盤尺寸加大一點避免放不下
-    int gridSize = 11,
+    int gridSize = 10,
   }) async {
     // 以「詞語注音」做接龍：上一個詞語最後一個音節 = 下一個詞語第一個音節
     // 再把每個音節放進棋盤的格子，形成可交錯的路徑。
