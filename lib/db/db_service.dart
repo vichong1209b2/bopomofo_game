@@ -1366,10 +1366,13 @@ class DbService {
       if (chars == null || chars.isEmpty) {
         tiles.add('$s|');
       } else {
-        // 若同一音節對到多個字，最多顯示 2 個，避免 tile 無限制膨脹
-        final list = chars.toList();
-        for (var i = 0; i < list.length && i < 2; i++) {
-          tiles.add('$s|${list[i]}');
+        // 需求：目前不做「多答案」題型，避免玩家看到不同代表字而誤以為有多解。
+        // - 若此音節在本關只對到「單一字」：顯示該代表字（例如 "ㄇㄛˊ|摩"）
+        // - 若對到多個字（同音換字）：不要顯示代表字，只顯示音節（例如 "ㄧㄢˊ|"）
+        if (chars.length == 1) {
+          tiles.add('$s|${chars.first}');
+        } else {
+          tiles.add('$s|');
         }
       }
     }

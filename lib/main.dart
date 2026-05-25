@@ -2463,6 +2463,11 @@ class _GamePageState extends State<GamePage> {
               Text(q.maskedWord, style: const TextStyle(fontSize: 40, fontWeight: FontWeight.w700)),
               const SizedBox(height: 6),
               Text('提示注音：${q.answerBopomofo}', style: const TextStyle(color: Colors.black54)),
+              const SizedBox(height: 4),
+              const Text(
+                '提醒：TTS 會依語境產生「變調」（例如「一」「不」），所以你聽到的聲調可能與提示注音（原調）不同。',
+                style: TextStyle(color: Colors.black45, fontSize: 12, height: 1.25),
+              ),
               const SizedBox(height: 12),
               LayoutBuilder(
                 builder: (ctx, constraints) {
@@ -2494,6 +2499,13 @@ class _GamePageState extends State<GamePage> {
                 onPressed: _canUseAudioHintUnlimited ? () => _useAudioHint(q.word, consume: false) : null,
                 icon: _themedIcon(widget.themeStyle, key: 'volume', fallback: Icons.volume_up),
                 label: const Text('再聽一次（不限次）'),
+              ),
+              const SizedBox(height: 8),
+              OutlinedButton.icon(
+                // 逐字朗讀：可減少變調造成的「聽起來跟提示注音不同」困惑（但多音字仍可能需要語境）
+                onPressed: _canUseAudioHintUnlimited ? () => _useAudioHint(q.word.split('').join(' '), consume: false) : null,
+                icon: const Icon(Icons.record_voice_over_outlined),
+                label: const Text('逐字聽一次（避免變調）'),
               ),
             ],
           ),
@@ -2730,7 +2742,9 @@ class _GamePageState extends State<GamePage> {
         if (q == null) return const Center(child: CircularProgressIndicator());
 
         Color cellColor(int cell) {
-          if (!q.usedCells.contains(cell)) return Colors.transparent;
+          // 背景格：仍顯示淡淡格線，讓玩家知道「這是一個棋盤」，
+          // 並更清楚分辨哪些格子是題目路徑（usedCells）。
+          if (!q.usedCells.contains(cell)) return const Color(0xFFF3F5F7);
           // 固定格（題目已給的提示）
           if (q.fixedCells.contains(cell)) return const Color(0xFF37474F); // blueGrey
           final filled = _gridFilled[cell];
@@ -2879,7 +2893,7 @@ class _GamePageState extends State<GamePage> {
                     minC = 0;
                     maxC = q.cols - 1;
                   }
-                  const pad = 1;
+                  const pad = 0; // 題目格子更大：不額外加外圍 padding
                   minR = math.max(0, minR - pad);
                   minC = math.max(0, minC - pad);
                   maxR = math.min(q.rows - 1, maxR + pad);
@@ -2915,18 +2929,18 @@ class _GamePageState extends State<GamePage> {
                           return GestureDetector(
                             onTap: isPuzzle ? () => selectCell(cell) : null,
                             child: Container(
-                              margin: const EdgeInsets.all(0.8),
+                              margin: const EdgeInsets.all(0.6),
                               decoration: BoxDecoration(
                                 color: bg,
                                 borderRadius: BorderRadius.circular(6),
                                 border: Border.all(
                                   // 更清楚地區分「可填格」：未選取時也有淡淡的黃框，選取時加粗
-                                  color: !used
-                                      ? Colors.transparent
-                                      : (selected
-                                          ? Colors.amber
+                                  color: selected
+                                      ? Colors.amber
+                                      : (!used
+                                          ? Colors.black12
                                           : (isPuzzle ? const Color(0xFF00897B) : Colors.black26)),
-                                  width: selected ? 2.8 : (isPuzzle ? 1.9 : 1.0),
+                                  width: selected ? 2.8 : (!used ? 0.9 : (isPuzzle ? 1.9 : 1.0)),
                                 ),
                                 boxShadow: [
                                   if (used)
@@ -2978,7 +2992,7 @@ class _GamePageState extends State<GamePage> {
             // 修復：當注音方塊很多時，Wrap 會把高度撐得太高，導致棋盤區域被擠壓到「最下排很難點」。
             // 固定一個高度，讓注音方塊區改成可捲動。
             SizedBox(
-              height: 140,
+              height: 120,
               child: SingleChildScrollView(
                 child: Wrap(
                   spacing: 8,
