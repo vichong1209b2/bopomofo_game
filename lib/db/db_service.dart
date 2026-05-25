@@ -183,9 +183,13 @@ class DbService {
     parts.add('$alias.difficulty <= ?');
     args.add(r.maxWordDifficulty);
 
-    // 國小：只用國小字詞
+    // 國小：理想上只用國小字詞（is_primary_school=1）。
+    //
+    // 但目前資料庫的 word.is_primary_school 標記可能不完整（例如某些來源的詞語沒有被標成 primary，
+    // 但仍有完整 bopomofo / word_char.cp_id 可用來出題），會導致國小等級在題型 A/C/E 完全抓不到題目。
+    // 因此這裡採用「primary OR common」作為國小的 stage guard，確保至少能出題且維持「官方常用詞」範圍。
     if (r.requirePrimaryWords) {
-      parts.add('$alias.is_primary_school = 1');
+      parts.add('($alias.is_primary_school = 1 OR $alias.is_common = 1)');
     }
 
     // 國中：至少是「常用」或「國小」
@@ -222,9 +226,10 @@ class DbService {
     // 因此 fallback 只放寬 difficulty/priority，不移除 primary/common 的門檻。
     final r = ruleForLevel(level);
     final guard = <String>[];
-    // 國小：只用國小字詞
+    // 國小：優先用國小字詞；但為避免資料庫 primary 標記不完整造成「完全無題」，
+    // 這裡與 _wordLevelWhere 一致採用 primary OR common 當作 stage guard。
     if (r.requirePrimaryWords) {
-      guard.add('$alias.is_primary_school = 1');
+      guard.add('($alias.is_primary_school = 1 OR $alias.is_common = 1)');
     }
     // 國中：至少是「常用」或「國小」
     if (stageForLevel(level) == EducationStage.juniorHigh) {
@@ -389,7 +394,7 @@ class DbService {
     }
 
     if (w.isEmpty) {
-      throw StateError('找不到可用的詞語（題型 A 需要 word_char.cp_id 對應）。');
+      throw StateError('找不到可用的「聽音選字」題目（此等級詞語注音/對應資料不足）。');
     }
     if (usedNote != null && usedNote != 'base') {
       AppLogger.log('[DB] A fallback level=${usedLevel ?? level} note=$usedNote allowFlag=$usedAllowFlag');

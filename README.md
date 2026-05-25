@@ -13,7 +13,15 @@
 - `assets/db/moe_enhanced.db`：強化版（含 `word_char.cp_id` 去歧義）
 - `assets/db/moe_raw.db`：原始轉檔版（保留教育部原欄位；供你查核/比對）
 
-資料來源：教育部《國語小字典》《國語辭典簡編本》下載版 xlsx 轉檔。
+資料來源：教育部《國語小字典》《國語辭典簡編本》下載版（xlsx）轉檔。  
+
+### 官方來源（可抓取／可建庫）參考連結
+- https://language.moe.gov.tw/001/Upload/Files/site_content/M0001/respub/index.html
+- https://language.moe.gov.tw/001/Upload/Files/site_content/M0001/respub/dict_reviseddict_download.html
+- https://www.naer.edu.tw/PageSyllabus?fid=52
+- https://cirn.moe.edu.tw/WebContent/index.aspx?sid=11&mid=5721
+- https://cirn.moe.edu.tw/WebContent/index.aspx?sid=11&mid=5737
+- https://stroke-order.learningweb.moe.edu.tw/download/4808.pdf
 
 ---
 
