@@ -16,6 +16,81 @@ class DbService {
   final Database _db;
   int? _maxWordIdCache;
 
+  /// 題庫不足時的等級放寬策略：
+  /// - 只能在同學段內逐級放寬（不跨到下一學段）
+  /// - 例如：國小二年級 → 2→3→4→5→6（不會跳到國中）
+  static List<EducationLevel> _fallbackLevelsWithinStage(EducationLevel level) {
+    // 若使用「All」則不需要再放寬
+    if (level == EducationLevel.elementaryAll ||
+        level == EducationLevel.juniorHighAll ||
+        level == EducationLevel.seniorHighAll) {
+      return [level];
+    }
+
+    final stage = stageForLevel(level);
+    final out = <EducationLevel>[];
+
+    switch (stage) {
+      case EducationStage.elementary:
+        final start = switch (level) {
+          EducationLevel.elementary1 => 1,
+          EducationLevel.elementary2 => 2,
+          EducationLevel.elementary3 => 3,
+          EducationLevel.elementary4 => 4,
+          EducationLevel.elementary5 => 5,
+          EducationLevel.elementary6 => 6,
+          _ => 1,
+        };
+        for (var g = start; g <= 6; g++) {
+          out.add(switch (g) {
+            1 => EducationLevel.elementary1,
+            2 => EducationLevel.elementary2,
+            3 => EducationLevel.elementary3,
+            4 => EducationLevel.elementary4,
+            5 => EducationLevel.elementary5,
+            _ => EducationLevel.elementary6,
+          });
+        }
+        break;
+      case EducationStage.juniorHigh:
+        final start = switch (level) {
+          EducationLevel.juniorHigh1 => 1,
+          EducationLevel.juniorHigh2 => 2,
+          EducationLevel.juniorHigh3 => 3,
+          _ => 1,
+        };
+        for (var g = start; g <= 3; g++) {
+          out.add(switch (g) {
+            1 => EducationLevel.juniorHigh1,
+            2 => EducationLevel.juniorHigh2,
+            _ => EducationLevel.juniorHigh3,
+          });
+        }
+        break;
+      case EducationStage.seniorHigh:
+        final start = switch (level) {
+          EducationLevel.seniorHigh1 => 1,
+          EducationLevel.seniorHigh2 => 2,
+          EducationLevel.seniorHigh3 => 3,
+          _ => 1,
+        };
+        for (var g = start; g <= 3; g++) {
+          out.add(switch (g) {
+            1 => EducationLevel.seniorHigh1,
+            2 => EducationLevel.seniorHigh2,
+            _ => EducationLevel.seniorHigh3,
+          });
+        }
+        break;
+      case EducationStage.higher:
+        // 大學以上目前不分年級，直接回傳原等級
+        out.add(level);
+        break;
+    }
+
+    return out.isEmpty ? [level] : out;
+  }
+
   // 讓「App 更新後的資料庫資源」可以覆蓋舊資料庫：
   // - 避免使用者裝過舊版後，Documents 裡的舊 DB 一直不會更新
   // - 不需要每次遊戲線上更新（維持離線）
@@ -234,9 +309,12 @@ class DbService {
     int optionCount = 4,
     EducationLevel level = EducationLevel.elementaryAll,
   }) async {
+    // 依需求：題庫不足時只在同學段內逐級放寬（不跨學段）
+    final levelChain = _fallbackLevelsWithinStage(level);
     List<Map<String, Object?>> w = const [];
     String? usedNote;
     bool usedAllowFlag = true;
+    EducationLevel? usedLevel;
 
     // 內部一致性檢查：word.bopomofo 的音節數/內容要能對上 word_char.cp_id 的逐字注音
     // （否則會出現「題目朗讀/顯示」與答案注音不一致，或玩家覺得題目有兩個答案）。
@@ -264,50 +342,57 @@ class DbService {
       return true;
     }
 
-    // 先試 allow_audio_to_char=1；若完全抓不到，再放寬移除 allow flag
+    // 先試 allow_audio_to_char=1；若完全抓不到，再放寬移除 allow flag。
     // 並且遇到「注音資料不一致」的詞會跳過，避免出到怪題。
-    for (var attempt = 0; attempt < 30; attempt++) {
-      w = const [];
-      usedNote = null;
-      usedAllowFlag = true;
+    //
+    // 額外：若該等級完全無題可出，依 levelChain 逐級放寬到同學段較高年級（不跨學段）。
+    for (final lv in levelChain) {
+      for (var attempt = 0; attempt < 30; attempt++) {
+        w = const [];
+        usedNote = null;
+        usedAllowFlag = true;
+        usedLevel = null;
 
-      for (final withAllow in [true, false]) {
-        for (final cand in _wordLevelWhereCandidates(level, alias: 'w')) {
-          final where = cand.where +
-              (withAllow ? " AND w.allow_audio_to_char = 1" : "") +
-              r'''
+        for (final withAllow in [true, false]) {
+          for (final cand in _wordLevelWhereCandidates(lv, alias: 'w')) {
+            final where = cand.where +
+                (withAllow ? " AND w.allow_audio_to_char = 1" : "") +
+                r'''
         AND EXISTS (
           SELECT 1 FROM word_char wc
           WHERE wc.word_id = w.word_id AND wc.cp_id IS NOT NULL
         )''';
-          w = await _randomWordPick(
-            selectSql: 'SELECT w.word_id, w.word, w.bopomofo FROM word w',
-            whereSql: where.trim(),
-            args: cand.args,
-          );
-          if (w.isNotEmpty) {
-            usedNote = cand.note;
-            usedAllowFlag = withAllow;
-            break;
+            w = await _randomWordPick(
+              selectSql: 'SELECT w.word_id, w.word, w.bopomofo FROM word w',
+              whereSql: where.trim(),
+              args: cand.args,
+            );
+            if (w.isNotEmpty) {
+              usedNote = cand.note;
+              usedAllowFlag = withAllow;
+              usedLevel = lv;
+              break;
+            }
           }
+          if (w.isNotEmpty) break;
         }
-        if (w.isNotEmpty) break;
+
+        if (w.isEmpty) break;
+
+        final wordId = (w.first['word_id'] as int);
+        final bopo = (w.first['bopomofo'] as String?) ?? '';
+        final ok = await _wordBopoConsistent(wordId, bopo);
+        if (ok) break;
+        AppLogger.log('[DB] A skip inconsistent word_id=$wordId');
       }
-
-      if (w.isEmpty) break;
-
-      final wordId = (w.first['word_id'] as int);
-      final bopo = (w.first['bopomofo'] as String?) ?? '';
-      final ok = await _wordBopoConsistent(wordId, bopo);
-      if (ok) break;
-      AppLogger.log('[DB] A skip inconsistent word_id=$wordId');
+      if (w.isNotEmpty) break;
     }
 
     if (w.isEmpty) {
       throw StateError('找不到可用的詞語（題型 A 需要 word_char.cp_id 對應）。');
     }
     if (usedNote != null && usedNote != 'base') {
-      AppLogger.log('[DB] A fallback level=$level note=$usedNote allowFlag=$usedAllowFlag');
+      AppLogger.log('[DB] A fallback level=${usedLevel ?? level} note=$usedNote allowFlag=$usedAllowFlag');
     }
 
     final wordId = (w.first['word_id'] as int);
