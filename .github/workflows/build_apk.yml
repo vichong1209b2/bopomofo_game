@@ -3,7 +3,12 @@ name: build-android-apk
 on:
   push:
     branches: [ "main" ]
+    # 版本釋出：push tag（例如 v21）就會把 APK 上傳到該 tag 的 Release
+    tags: [ "v*" ]
   workflow_dispatch: {}
+
+permissions:
+  contents: write
 
 jobs:
   build:
@@ -42,3 +47,26 @@ jobs:
           name: app-release-apk
           path: bopomofo_game/build/app/outputs/flutter-apk/app-release.apk
 
+      # main 更新 → 更新 latest Release（讓一般人直接下載最新版）
+      - name: Publish APK to Release (latest)
+        if: github.ref == 'refs/heads/main'
+        uses: ncipollo/release-action@v1
+        with:
+          tag: latest
+          name: Latest
+          allowUpdates: true
+          replacesArtifacts: true
+          artifacts: bopomofo_game/build/app/outputs/flutter-apk/app-release.apk
+          artifactContentType: application/vnd.android.package-archive
+
+      # tag（例如 v21）→ 更新該版本 Release（讓人下載指定版本）
+      - name: Publish APK to Release (tag)
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: ncipollo/release-action@v1
+        with:
+          tag: ${{ github.ref_name }}
+          name: Release ${{ github.ref_name }}
+          allowUpdates: true
+          replacesArtifacts: true
+          artifacts: bopomofo_game/build/app/outputs/flutter-apk/app-release.apk
+          artifactContentType: application/vnd.android.package-archive

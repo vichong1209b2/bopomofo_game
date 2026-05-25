@@ -173,15 +173,15 @@ String themeLabel(ThemeStyle t) {
     case ThemeStyle.night:
       return '夜色';
     case ThemeStyle.kuromi:
-      return '庫洛米風';
+      return '庫洛米';
     case ThemeStyle.cinnamoroll:
-      return '大耳狗風';
+      return '大耳狗';
     case ThemeStyle.mymelody:
-      return '美樂蒂風';
+      return '美樂蒂';
     case ThemeStyle.carbot:
-      return '衝鋒戰士風';
+      return '衝鋒戰士';
     case ThemeStyle.ultraman:
-      return '奧特曼風';
+      return '奧特曼';
   }
 }
 
@@ -2730,10 +2730,12 @@ class _GamePageState extends State<GamePage> {
         if (q == null) return const Center(child: CircularProgressIndicator());
 
         Color cellColor(int cell) {
-          if (!q.usedCells.contains(cell)) return Colors.white.withOpacity(0.35);
-          if (q.fixedCells.contains(cell)) return const Color(0xFF2E7D32); // green
+          if (!q.usedCells.contains(cell)) return Colors.transparent;
+          // 固定格（題目已給的提示）
+          if (q.fixedCells.contains(cell)) return const Color(0xFF37474F); // blueGrey
           final filled = _gridFilled[cell];
-          if (filled == null || filled.isEmpty) return const Color(0xFF00695C); // teal
+          // 題目格（玩家要填）：空白時用白底＋外框區分
+          if (filled == null || filled.isEmpty) return Colors.white;
           final ans = q.solution[cell] ?? '';
           if (filled == ans) return const Color(0xFF2E7D32);
           return const Color(0xFFC62828);
@@ -2913,7 +2915,7 @@ class _GamePageState extends State<GamePage> {
                           return GestureDetector(
                             onTap: isPuzzle ? () => selectCell(cell) : null,
                             child: Container(
-                              margin: const EdgeInsets.all(1.2),
+                              margin: const EdgeInsets.all(0.8),
                               decoration: BoxDecoration(
                                 color: bg,
                                 borderRadius: BorderRadius.circular(6),
@@ -2923,8 +2925,8 @@ class _GamePageState extends State<GamePage> {
                                       ? Colors.transparent
                                       : (selected
                                           ? Colors.amber
-                                          : (isPuzzle ? Colors.amber.withOpacity(0.40) : Colors.black12)),
-                                  width: selected ? 2.6 : (isPuzzle ? 1.6 : 1.0),
+                                          : (isPuzzle ? const Color(0xFF00897B) : Colors.black26)),
+                                  width: selected ? 2.8 : (isPuzzle ? 1.9 : 1.0),
                                 ),
                                 boxShadow: [
                                   if (used)
@@ -2947,7 +2949,9 @@ class _GamePageState extends State<GamePage> {
                                         fontSize: fontSize,
                                         height: 1.15,
                                         fontWeight: FontWeight.w800,
-                                        color: used ? Colors.white : Colors.black26,
+                                        color: !used
+                                            ? Colors.transparent
+                                            : (q.fixedCells.contains(cell) ? Colors.white : Colors.black87),
                                       ),
                                       strutStyle: const StrutStyle(forceStrutHeight: true, height: 1.15),
                                       textHeightBehavior: const TextHeightBehavior(
@@ -2980,8 +2984,11 @@ class _GamePageState extends State<GamePage> {
                   spacing: 8,
                   runSpacing: 8,
                   children: q.tiles.map((t) {
+                    final parts = t.split('|');
+                    final syl = parts.isNotEmpty ? parts[0] : t;
+                    final ch = (parts.length >= 2 ? parts[1] : '').trim();
                     return InkWell(
-                      onTap: (_locked || _isFinished) ? null : () => fillSelected(t),
+                      onTap: (_locked || _isFinished) ? null : () => fillSelected(syl),
                       child: Container(
                         padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
                         decoration: BoxDecoration(
@@ -2989,9 +2996,25 @@ class _GamePageState extends State<GamePage> {
                           borderRadius: BorderRadius.circular(12),
                           border: Border.all(color: Colors.white.withOpacity(0.22)),
                         ),
-                        child: Text(
-                          t,
-                          style: const TextStyle(color: Colors.white, fontSize: 20, fontWeight: FontWeight.w900),
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Text(
+                              syl,
+                              style: const TextStyle(color: Colors.white, fontSize: 22, fontWeight: FontWeight.w900),
+                            ),
+                            if (ch.isNotEmpty) ...[
+                              const SizedBox(height: 2),
+                              Text(
+                                ch,
+                                style: TextStyle(
+                                  color: Colors.white.withOpacity(0.92),
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.w800,
+                                ),
+                              ),
+                            ],
+                          ],
                         ),
                       ),
                     );

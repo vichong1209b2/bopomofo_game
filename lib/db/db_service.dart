@@ -1078,6 +1078,10 @@ class DbService {
 
   Future<BopoChainGridPuzzle> _attachExtraTiles(BopoChainGridPuzzle p) async {
     final tileSet = p.tiles.toSet();
+    // 目標：在「不缺任何必要音節」前提下，追加少量干擾音節。
+    // 不做硬裁切，避免誤刪必要音節導致題目無解。
+    final target = (tileSet.length < 20) ? 20 : tileSet.length;
+    final hardCap = 26;
     // 追加少量干擾音節（避免題目太像「只剩抄答案」）
     final extra = await _db.rawQuery(r'''
       SELECT DISTINCT bopomofo
@@ -1089,11 +1093,10 @@ class DbService {
     for (final r in extra) {
       final b = (r['bopomofo'] as String?) ?? '';
       if (b.isEmpty) continue;
-      tileSet.add(b);
-      if (tileSet.length >= 14) break;
+      tileSet.add('$b|');
+      if (tileSet.length >= target || tileSet.length >= hardCap) break;
     }
     final tiles = tileSet.toList()..shuffle(Random());
-    if (tiles.length > 14) tiles.removeRange(14, tiles.length);
     return BopoChainGridPuzzle(
       rows: p.rows,
       cols: p.cols,
@@ -1334,15 +1337,43 @@ class DbService {
       }
     }
 
-    // tiles：把所有需要填的音節放進來（再加 2 個干擾）
-    final tileSet = <String>{};
+    // tiles：必要音節一定要全部包含；額外再加少量干擾音節（在 _attachExtraTiles 做）。
+    //
+    // 為了降低「同音換字」造成的多答案困惑，tile 會盡量附上代表字（例如 "ㄇㄛˊ|摩"）。
+    // 注意：點擊 tile 仍只會填入注音，判斷也只看注音（不影響正確性）。
+    final requiredSyl = <String>{};
     for (final k in used) {
       final v = sol[k];
-      if (v != null) tileSet.add(v);
+      if (v != null && v.trim().isNotEmpty) requiredSyl.add(v.trim());
     }
-    final tiles = tileSet.toList();
+
+    final sylToChars = <String, Set<String>>{};
+    for (final e in chain) {
+      final chars = e.word.split('');
+      if (chars.length != e.syl.length) continue;
+      for (var i = 0; i < e.syl.length; i++) {
+        final s = e.syl[i].trim();
+        if (s.isEmpty) continue;
+        final ch = chars[i].trim();
+        if (ch.isEmpty) continue;
+        (sylToChars[s] ??= <String>{}).add(ch);
+      }
+    }
+
+    final tiles = <String>[];
+    for (final s in requiredSyl) {
+      final chars = sylToChars[s];
+      if (chars == null || chars.isEmpty) {
+        tiles.add('$s|');
+      } else {
+        // 若同一音節對到多個字，最多顯示 2 個，避免 tile 無限制膨脹
+        final list = chars.toList();
+        for (var i = 0; i < list.length && i < 2; i++) {
+          tiles.add('$s|${list[i]}');
+        }
+      }
+    }
     tiles.shuffle(Random());
-    if (tiles.length > 14) tiles.removeRange(14, tiles.length);
 
     return BopoChainGridPuzzle(
       rows: rows,
