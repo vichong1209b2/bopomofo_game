@@ -17,8 +17,8 @@ class DbService {
   int? _maxWordIdCache;
 
   /// 題庫不足時的等級放寬策略：
-  /// - 只能在同學段內逐級放寬（不跨到下一學段）
-  /// - 例如：國小二年級 → 2→3→4→5→6（不會跳到國中）
+  /// - 只會往「更低年級／更低學段」放寬（不會放寬到更高年級）
+  /// - 例如：國小二年級 → 2→1；國中一年級 → 國中1→國小（綜合）
   static List<EducationLevel> _fallbackLevelsWithinStage(EducationLevel level) {
     // 若使用「All」則不需要再放寬
     if (level == EducationLevel.elementaryAll ||
@@ -41,7 +41,7 @@ class DbService {
           EducationLevel.elementary6 => 6,
           _ => 1,
         };
-        for (var g = start; g <= 6; g++) {
+        for (var g = start; g >= 1; g--) {
           out.add(switch (g) {
             1 => EducationLevel.elementary1,
             2 => EducationLevel.elementary2,
@@ -59,13 +59,15 @@ class DbService {
           EducationLevel.juniorHigh3 => 3,
           _ => 1,
         };
-        for (var g = start; g <= 3; g++) {
+        for (var g = start; g >= 1; g--) {
           out.add(switch (g) {
             1 => EducationLevel.juniorHigh1,
             2 => EducationLevel.juniorHigh2,
             _ => EducationLevel.juniorHigh3,
           });
         }
+        // 國中最低也會涵蓋國小（綜合）
+        out.add(EducationLevel.elementaryAll);
         break;
       case EducationStage.seniorHigh:
         final start = switch (level) {
@@ -74,13 +76,16 @@ class DbService {
           EducationLevel.seniorHigh3 => 3,
           _ => 1,
         };
-        for (var g = start; g <= 3; g++) {
+        for (var g = start; g >= 1; g--) {
           out.add(switch (g) {
             1 => EducationLevel.seniorHigh1,
             2 => EducationLevel.seniorHigh2,
             _ => EducationLevel.seniorHigh3,
           });
         }
+        // 高中最低也會涵蓋國中/國小（綜合）
+        out.add(EducationLevel.juniorHighAll);
+        out.add(EducationLevel.elementaryAll);
         break;
       case EducationStage.higher:
         // 大學以上目前不分年級，直接回傳原等級
@@ -245,15 +250,20 @@ class DbService {
     final argsA = <Object?>[r.maxWordDifficulty];
     out.add((where: partsA.join(' AND '), args: argsA, note: 'relax-priority'));
 
-    // 2b) 放寬：保留 primary/common，difficulty 提高到 5（仍排除 low priority）
-    final partsB = <String>['$alias.difficulty <= 5', ...guard];
-    if (!r.includeLowPriorityWords) {
-      partsB.add("$alias.game_priority != 'low'");
-    }
-    out.add((where: partsB.join(' AND '), args: const <Object?>[], note: 'relax-difficulty'));
+    // 國小年級（非 All）：避免「為了出題」而把 difficulty 放寬到太高造成超出年級範圍。
+    // 若真的題庫不足，交由上層做「盡量不重複」與「必要時才重複已答對題目」的策略處理。
+    final isElementaryGrade = stageForLevel(level) == EducationStage.elementary && level != EducationLevel.elementaryAll;
+    if (!isElementaryGrade) {
+      // 2b) 放寬：保留 primary/common，difficulty 提高到 5（仍排除 low priority）
+      final partsB = <String>['$alias.difficulty <= 5', ...guard];
+      if (!r.includeLowPriorityWords) {
+        partsB.add("$alias.game_priority != 'low'");
+      }
+      out.add((where: partsB.join(' AND '), args: const <Object?>[], note: 'relax-difficulty'));
 
-    // 2c) 放寬：只保留 primary/common（最後保底，但仍不跨學段）
-    out.add((where: (guard.isEmpty ? '1=1' : guard.join(' AND ')), args: const <Object?>[], note: 'stage-guard-only'));
+      // 2c) 放寬：只保留 primary/common（最後保底，但仍不跨學段）
+      out.add((where: (guard.isEmpty ? '1=1' : guard.join(' AND ')), args: const <Object?>[], note: 'stage-guard-only'));
+    }
 
     return out;
   }
@@ -314,7 +324,7 @@ class DbService {
     int optionCount = 4,
     EducationLevel level = EducationLevel.elementaryAll,
   }) async {
-    // 依需求：題庫不足時只在同學段內逐級放寬（不跨學段）
+    // 依需求：題庫不足時只往「更低年級／更低學段」放寬（不跨到更高年級）
     final levelChain = _fallbackLevelsWithinStage(level);
     List<Map<String, Object?>> w = const [];
     String? usedNote;
@@ -350,7 +360,7 @@ class DbService {
     // 先試 allow_audio_to_char=1；若完全抓不到，再放寬移除 allow flag。
     // 並且遇到「注音資料不一致」的詞會跳過，避免出到怪題。
     //
-    // 額外：若該等級完全無題可出，依 levelChain 逐級放寬到同學段較高年級（不跨學段）。
+    // 額外：若該等級完全無題可出，依 levelChain 往「較低年級／較低學段」放寬（不跨到更高年級）。
     for (final lv in levelChain) {
       for (var attempt = 0; attempt < 30; attempt++) {
         w = const [];

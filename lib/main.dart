@@ -614,6 +614,8 @@ class GameSettings {
       }
 
       final playMode = enumByName(PlayMode.values, m['playMode']?.toString());
+      // 相容舊版：已移除「練習」玩法，讀到 practice 時改為一般玩法（避免 UI/規則不一致）
+      final effectivePlayMode = (playMode == PlayMode.practice) ? PlayMode.scoreTarget : playMode;
       final goal = GameGoal.fromMap(m['goal']);
 
       // 若 goal 解析不到任何值，依 playMode 回退到預設 goal（避免目標顯示為空）。
@@ -621,7 +623,7 @@ class GameSettings {
               goal.targetCorrect == null &&
               goal.timeLimitSec == null &&
               goal.lives == null)
-          ? defaultGoalFor(playMode)
+          ? defaultGoalFor(effectivePlayMode)
           : goal;
 
       String? optStr(dynamic v) {
@@ -634,7 +636,7 @@ class GameSettings {
       return GameSettings(
         mode: enumByName(GameMode.values, m['mode']?.toString()),
         flavor: enumByName(DataFlavor.values, m['flavor']?.toString()),
-        playMode: playMode,
+        playMode: effectivePlayMode,
         goal: effectiveGoal,
         level: enumByName(EducationLevel.values, m['level']?.toString()),
         themeStyle: enumByName(ThemeStyle.values, m['themeStyle']?.toString()),
@@ -913,6 +915,11 @@ class _SettingsPageState extends State<SettingsPage> {
   @override
   void initState() {
     super.initState();
+    // 「練習」玩法已停用：若舊版本設定曾保存為 practice，進設定頁時自動轉成一般玩法
+    if (_playMode == PlayMode.practice) {
+      _playMode = PlayMode.scoreTarget;
+      _goal = defaultGoalFor(_playMode);
+    }
     // 重要：_forceGoogleEngine 代表「即使系統/ROM 列不到引擎，也要強制指定 Google TTS」的特殊模式。
     // 這不應該因為使用者單純選了 Google 引擎就自動打開，否則下次進設定頁會把「引擎下拉選單」鎖住（反灰）。
     _forceGoogleEngine = false;
@@ -1072,18 +1079,13 @@ class _SettingsPageState extends State<SettingsPage> {
   Future<void> _editGoal() async {
     GameGoal g = _goal;
     switch (_playMode) {
-      case PlayMode.practice: {
-        final v = await _askInt(title: '練習模式：答對幾題算完成？', initial: g.targetCorrect ?? 10);
-        if (v == null) return;
-        g = g.copyWith(targetCorrect: v);
-        break;
-      }
       case PlayMode.scoreTarget: {
         final v = await _askInt(title: '分數目標：達到幾分算完成？', initial: g.targetScore ?? 80);
         if (v == null) return;
         g = g.copyWith(targetScore: v);
         break;
       }
+      case PlayMode.practice: // 已停用；相容舊設定
       case PlayMode.correctTarget: {
         final v = await _askInt(title: '答題目標：答對幾題算完成？', initial: g.targetCorrect ?? 20);
         if (v == null) return;
@@ -1451,60 +1453,26 @@ class _SettingsPageState extends State<SettingsPage> {
           const SizedBox(height: 20),
           const Text('題型', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w600)),
           const SizedBox(height: 8),
-          RadioListTile(
-            value: GameMode.aAudioToChar,
-            groupValue: _mode,
-            onChanged: (v) => setState(() => _mode = v!),
-            title: const Text('A：聽音選字（TTS 朗讀詞語）'),
-          ),
-          RadioListTile(
-            value: GameMode.bCharToBopo,
-            groupValue: _mode,
-            onChanged: (v) => setState(() => _mode = v!),
-            title: const Text('B：看字選音（單音字版）'),
-          ),
-          RadioListTile(
-            value: GameMode.cPairing,
-            groupValue: _mode,
-            onChanged: (v) => setState(() => _mode = v!),
-            title: const Text('C：配對（詞語 ↔ 注音）'),
-          ),
-          RadioListTile(
-            value: GameMode.dBopoToChar,
-            groupValue: _mode,
-            onChanged: (v) => setState(() => _mode = v!),
-            title: const Text('D：看注音選字（注音 → 字）'),
-          ),
-          RadioListTile(
-            value: GameMode.eWordToBopo,
-            groupValue: _mode,
-            onChanged: (v) => setState(() => _mode = v!),
-            title: const Text('E：看詞語選注音（詞語 → 注音）'),
-          ),
-          RadioListTile(
-            value: GameMode.fWordChain,
-            groupValue: _mode,
-            onChanged: (v) => setState(() => _mode = v!),
-            title: const Text('接龍填空：語詞接龍（選出下一個詞語）'),
-          ),
-          RadioListTile(
-            value: GameMode.gBopoChainGrid,
-            groupValue: _mode,
-            onChanged: (v) => setState(() => _mode = v!),
-            title: const Text('注音接龍（棋盤填空：點格子填注音，可重複使用）'),
-          ),
-          RadioListTile(
-            value: GameMode.mix,
-            groupValue: _mode,
-            onChanged: (v) => setState(() => _mode = v!),
-            title: const Text('混合題型（每題隨機）'),
+          DropdownButtonFormField<GameMode>(
+            value: _mode,
+            decoration: const InputDecoration(border: OutlineInputBorder(), labelText: '題型'),
+            items: const [
+              DropdownMenuItem(value: GameMode.aAudioToChar, child: Text('A：聽音選字（TTS 朗讀詞語）')),
+              DropdownMenuItem(value: GameMode.bCharToBopo, child: Text('B：看字選音（單音字版）')),
+              DropdownMenuItem(value: GameMode.cPairing, child: Text('C：配對（詞語 ↔ 注音）')),
+              DropdownMenuItem(value: GameMode.dBopoToChar, child: Text('D：看注音選字（注音 → 字）')),
+              DropdownMenuItem(value: GameMode.eWordToBopo, child: Text('E：看詞語選注音（詞語 → 注音）')),
+              DropdownMenuItem(value: GameMode.fWordChain, child: Text('接龍填空：語詞接龍（選出下一個詞語）')),
+              DropdownMenuItem(value: GameMode.gBopoChainGrid, child: Text('注音接龍（棋盤填空：點格子填注音）')),
+              DropdownMenuItem(value: GameMode.mix, child: Text('混合題型（每題隨機）')),
+            ],
+            onChanged: (v) => setState(() => _mode = v ?? _mode),
           ),
           const SizedBox(height: 12),
           const Text('玩法（規則/目標）', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w600)),
           const SizedBox(height: 8),
           SegmentedButton<PlayMode>(
             segments: const [
-              ButtonSegment(value: PlayMode.practice, label: Text('練習')),
               ButtonSegment(value: PlayMode.scoreTarget, label: Text('目標分數')),
               ButtonSegment(value: PlayMode.correctTarget, label: Text('目標題數')),
               ButtonSegment(value: PlayMode.timeAttack, label: Text('限時挑戰')),
@@ -1599,6 +1567,12 @@ class _GamePageState extends State<GamePage> {
   WordChainQuestion? _qF;
   BopoChainGridPuzzle? _qG;
 
+  // 盡量避免「玩家已答對」的題目重複出現（同一局遊戲內）
+  static const int _solvedCap = 800;
+  final List<int> _solvedWordOrder = [];
+  final Set<int> _solvedWordIds = {};
+  final Set<String> _solvedWords = {};
+
   // 注音接龍棋盤：作答狀態
   int? _gridSelectedCell;
   final Map<int, String> _gridFilled = {}; // cellIndex -> currently filled syllable
@@ -1621,6 +1595,41 @@ class _GamePageState extends State<GamePage> {
   bool _currentCounted = false;
   bool _currentTouched = false;
   String? _selectedCorrectOption;
+
+  void _rememberSolvedWordId(int id) {
+    if (_solvedWordIds.contains(id)) return;
+    _solvedWordIds.add(id);
+    _solvedWordOrder.add(id);
+    while (_solvedWordOrder.length > _solvedCap) {
+      final old = _solvedWordOrder.removeAt(0);
+      _solvedWordIds.remove(old);
+    }
+  }
+
+  void _rememberSolvedWords(Iterable<String> words) {
+    for (final w in words) {
+      final t = w.trim();
+      if (t.isEmpty) continue;
+      _solvedWords.add(t);
+      if (_solvedWords.length > _solvedCap) {
+        // 超過上限時就清空（避免無限成長）；之後仍會「盡量不重複」
+        _solvedWords.clear();
+        break;
+      }
+    }
+  }
+
+  Future<T> _avoidRepeat<T>(
+    Future<T> Function() gen,
+    bool Function(T v) isSolved, {
+    int tries = 14,
+  }) async {
+    for (var i = 0; i < tries; i++) {
+      final v = await gen();
+      if (!isSolved(v)) return v;
+    }
+    return gen();
+  }
 
   @override
   void initState() {
@@ -1914,7 +1923,10 @@ class _GamePageState extends State<GamePage> {
       AppLogger.log('[Q] next start mode=$_activeMode level=${widget.level}');
       if (_activeMode == GameMode.aAudioToChar) {
         final q = await _withTimeout(
-          () => db.randomAudioToCharQuestion(level: widget.level),
+          () => _avoidRepeat(
+            () => db.randomAudioToCharQuestion(level: widget.level),
+            (AudioToCharQuestion x) => _solvedWordIds.contains(x.wordId),
+          ),
           seconds: 12,
           label: 'qA',
         );
@@ -1941,7 +1953,19 @@ class _GamePageState extends State<GamePage> {
         setState(() => _qB = q);
       } else if (_activeMode == GameMode.cPairing) {
         final q = await _withTimeout(
-          () => db.randomPairingRound(level: widget.level),
+          () => _avoidRepeat(
+            () => db.randomPairingRound(level: widget.level),
+            (PairingRound x) {
+              // 若本輪詞語大多都玩過了，才允許重複（避免一直出相同輪）
+              final keys = x.answerMap.keys;
+              if (keys.isEmpty) return false;
+              var solved = 0;
+              for (final w in keys) {
+                if (_solvedWords.contains(w.trim())) solved++;
+              }
+              return solved >= (keys.length * 0.75);
+            },
+          ),
           seconds: 12,
           label: 'qC',
         );
@@ -1957,7 +1981,10 @@ class _GamePageState extends State<GamePage> {
         setState(() => _qD = q);
       } else if (_activeMode == GameMode.eWordToBopo) {
         final q = await _withTimeout(
-          () => db.randomWordToBopoQuestion(level: widget.level),
+          () => _avoidRepeat(
+            () => db.randomWordToBopoQuestion(level: widget.level),
+            (WordToBopoQuestion x) => _solvedWordIds.contains(x.wordId),
+          ),
           seconds: 12,
           label: 'qE',
         );
@@ -1983,7 +2010,18 @@ class _GamePageState extends State<GamePage> {
         }
       } else if (_activeMode == GameMode.gBopoChainGrid) {
         final q = await _withTimeout(
-          () => db.randomBopoChainGridPuzzle(level: widget.level),
+          () => _avoidRepeat(
+            () => db.randomBopoChainGridPuzzle(level: widget.level),
+            (BopoChainGridPuzzle x) {
+              // 注音接龍偏關卡玩法：用「本關詞語」做弱去重
+              if (x.words.isEmpty) return false;
+              var solved = 0;
+              for (final w in x.words) {
+                if (_solvedWords.contains(w.trim())) solved++;
+              }
+              return solved >= (x.words.length * 0.75);
+            },
+          ),
           seconds: 14,
           label: 'qG',
         );
@@ -2042,9 +2080,7 @@ class _GamePageState extends State<GamePage> {
   void _mark(bool correct, {bool firstTry = true, bool countAsQuestion = true}) {
     if (_isFinished) return;
     _currentTouched = true;
-    final rules = widget.playMode == PlayMode.practice
-        ? const ScoringRules(correctFirstTry: 1, correctAfterWrong: 1, wrongPenalty: 0)
-        : _defaultScoring;
+    final rules = _defaultScoring;
 
     setState(() {
       if (correct) {
@@ -2057,7 +2093,7 @@ class _GamePageState extends State<GamePage> {
         _wrongTaps += 1;
         _streak = 0;
         _score += rules.wrongPenalty;
-        _feedback = rules.wrongPenalty == 0 ? '答錯（練習模式不扣分）' : '答錯 ${rules.wrongPenalty}';
+        _feedback = '答錯 ${rules.wrongPenalty}';
         if (widget.playMode == PlayMode.survival) {
           _lives = (_lives ?? 0) - 1;
         }
@@ -2259,6 +2295,26 @@ class _GamePageState extends State<GamePage> {
         _chainCurrentWord = opt;
       } else {
         _chainCurrentWord = null;
+      }
+      // 答對後：盡量避免之後再出同題
+      switch (_activeMode) {
+        case GameMode.aAudioToChar:
+          final q = _qA;
+          if (q != null) _rememberSolvedWordId(q.wordId);
+          break;
+        case GameMode.eWordToBopo:
+          final q = _qE;
+          if (q != null) _rememberSolvedWordId(q.wordId);
+          break;
+        case GameMode.fWordChain:
+          _rememberSolvedWords([opt]);
+          break;
+        case GameMode.bCharToBopo:
+        case GameMode.cPairing:
+        case GameMode.dBopoToChar:
+        case GameMode.gBopoChainGrid:
+        case GameMode.mix:
+          break;
       }
       _mark(true, firstTry: firstTry, countAsQuestion: true);
     } else {
@@ -2537,6 +2593,8 @@ class _GamePageState extends State<GamePage> {
                               // 配對題：每個配對成功加分，但「題數」以整輪完成才算 1 題
                               _mark(true, firstTry: true, countAsQuestion: false);
                               if (_pairingMatchedWords.length == totalPairs) {
+                                // 本輪完成：把本輪詞語記起來，後面盡量不要再出（除非題庫真的不夠）
+                                _rememberSolvedWords(q.answerMap.keys);
                                 setState(() => _feedback = '本輪完成！');
                                 _countSolvedIfNeeded(solved: true, firstTry: true);
                                 _checkEnd();
@@ -2769,6 +2827,8 @@ class _GamePageState extends State<GamePage> {
           }
           if (allOk) {
             setState(() => _locked = true);
+            // 過關後：記住本關詞語，後面盡量不要再出同一關/同一批詞
+            _rememberSolvedWords(q.words);
             _mark(true, firstTry: _gridWrongTries == 0, countAsQuestion: true);
           }
         }
@@ -2830,7 +2890,8 @@ class _GamePageState extends State<GamePage> {
                   // 注音符號有「上方聲調/標記」與「下方韻母」，
                   // 如果格子偏小、又遇到某些字型，會看起來像「只顯示上半部」。
                   // 這裡把字體稍微放大，但用 FittedBox(scaleDown) 保證永遠不會被裁切。
-                  final fontSize = (size * 0.44).clamp(16.0, 28.0);
+                  // 讓聲調更清楚：再放大一點字體上限，並保留 FittedBox 防裁切
+                  final fontSize = (size * 0.56).clamp(18.0, 34.0);
                   return Center(
                     child: SizedBox(
                       width: size * viewCols,
@@ -2913,7 +2974,7 @@ class _GamePageState extends State<GamePage> {
             // 修復：當注音方塊很多時，Wrap 會把高度撐得太高，導致棋盤區域被擠壓到「最下排很難點」。
             // 固定一個高度，讓注音方塊區改成可捲動。
             SizedBox(
-              height: 190,
+              height: 140,
               child: SingleChildScrollView(
                 child: Wrap(
                   spacing: 8,
@@ -2922,7 +2983,7 @@ class _GamePageState extends State<GamePage> {
                     return InkWell(
                       onTap: (_locked || _isFinished) ? null : () => fillSelected(t),
                       child: Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
                         decoration: BoxDecoration(
                           color: const Color(0xFF00695C),
                           borderRadius: BorderRadius.circular(12),
@@ -2930,7 +2991,7 @@ class _GamePageState extends State<GamePage> {
                         ),
                         child: Text(
                           t,
-                          style: const TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.w900),
+                          style: const TextStyle(color: Colors.white, fontSize: 20, fontWeight: FontWeight.w900),
                         ),
                       ),
                     );

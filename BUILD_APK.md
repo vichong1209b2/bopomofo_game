@@ -37,10 +37,21 @@ flutter build apk --release
 3. 到 GitHub → Actions → 觸發 workflow（push 後會自動跑）
 4. 進入該次 workflow run，下載 artifact：`app-release-apk`
 
+### B2. 讓 APK 直接出現在 GitHub Release（推薦給一般下載者）
+本 repo 已提供 workflow：  
+- **每次 main 更新**會自動更新一個 `latest` Release，瀏覽者可直接下載「最新版 APK」  
+- **推送版本 tag（例如 `v21`）**會自動建立/更新對應 Release，瀏覽者可下載「指定版本 APK」
+
+你只要在本機執行（或用 GitHub 網頁建立 tag）：
+```bash
+git tag v21
+git push origin v21
+```
+之後到 GitHub → Releases 就會看到 `v21`，裡面附有 APK。
+
 ---
 
 ## 方案 C：只有 Android 手機、想在手機上做（不推薦）
 
 技術上可以用 **Termux + Flutter** 嘗試建置，但環境配置很重、容易踩坑（Android SDK/NDK/Java/Gradle）。
 若你真的只有手機可用，我建議改走「方案 B：GitHub Actions」最省事。
-
